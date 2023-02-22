@@ -1,0 +1,3 @@
+C:\Users\Root\Desktop\ENGR 712\testGPT2\x64\Debug\testGPT2.vcxproj.CopyComplete
+C:\Users\Root\Desktop\ENGR 712\testGPT2\x64\Debug\testGPT2.exe
+C:\Users\Root\Desktop\ENGR 712\testGPT2\x64\Debug\raylib.dll
