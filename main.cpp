@@ -100,6 +100,12 @@ int main() {
     std::vector<Particle> FreeParticles(startingNumParticles,Particle(500,500,RED));
     std::vector<Particle> ClusterParticles(startingClusterParticles,Particle(screenWidth/2.0,screenHeight/2.0,WHITE));
 
+    Camera2D camera = { 0 };
+    camera.target = { screenWidth / 2.0f, screenHeight / 2.0f };
+    camera.offset = { screenWidth / 2.0f, screenHeight / 2.0f };
+    camera.rotation = 0.0f;
+    camera.zoom = 1.0f;
+
     //main loop
     while (!WindowShouldClose()) {
 
@@ -154,13 +160,19 @@ int main() {
         ClearBackground(BLACK);
         DrawFPS(20, 20);
 
+        BeginMode2D(camera);
         for (int i = 0; i < FreeParticles.size(); i++) {
-            DrawCircleV(FreeParticles[i].pos, 2, FreeParticles[i].color);
+            DrawRectangleV(FreeParticles[i].pos, { 2,2 }, FreeParticles[i].color);
+            //DrawPixelV(FreeParticles[i].pos, FreeParticles[i].color);
+            //DrawCircleV(FreeParticles[i].pos, 2, FreeParticles[i].color);
         }
 
         for (int i = 0; i < ClusterParticles.size(); i++) {
-            DrawCircleV(ClusterParticles[i].pos, 3, ClusterParticles[i].color);
+            //DrawCircleV(ClusterParticles[i].pos, 3, ClusterParticles[i].color);
+            DrawRectangleV(ClusterParticles[i].pos, { 2,2 }, ClusterParticles[i].color);
         }
+        EndMode2D();
+
 
         EndDrawing();
     }
