@@ -13,8 +13,9 @@ float RandomFloat(float min, float max, std::mt19937& rng);
 //---------------------------------------------------------------------------------------------------------------------------------
 
 
-const int screenWidth = 2560, screenHeight = 1440, numThreads = 20;
-int startingNumParticles = 20000, startingClusterParticles = 1;
+const int screenWidth = 2560, screenHeight = 1440, screenDepth = 2000, numThreads = 20;
+int startingNumParticles = 2000, startingClusterParticles = 1;
+float collisionDistance = 2.0;
 
 std::mt19937 rng = CreateGeneratorWithTimeSeed();
 
@@ -23,47 +24,101 @@ std::mt19937 rng = CreateGeneratorWithTimeSeed();
 class Particle {
 public:
     Vector2 pos;
+    Vector3 pos3D;
     Color color;
-    bool isStuck;
+    bool isStuck, is3D;
 
     Particle(float x, float y, Color col) {
         pos = { x,y };
+        pos3D = { x,y,0 };
         color = col;
         isStuck = false;
+        is3D = false;
+    }
+    Particle(Vector2 position, Color col) {
+        pos = position;
+        color = col;
+        isStuck = false;
+        is3D = false;
+    }
+
+    Particle(Vector3 position, Color col) {
+        pos3D = position;
+        color = col;
+        isStuck = false;
+        is3D = true;
     }
 
     Particle() {
         pos = { screenWidth - 10, screenHeight - 10 };
+        pos3D = { screenWidth - 10, screenHeight - 10, 0 };
         color = WHITE;
         isStuck = false;
     }
 
     void RandomWalk(float stepSize, int numSteps) {
-        for (int i = 0; i < numSteps; i++) {
-            float dx = RandomFloat(-1, 1, rng);
-            float dy = RandomFloat(-1, 1, rng);
+        if (!is3D) {
+            for (int i = 0; i < numSteps; i++) {
+                float dx = RandomFloat(-1, 1, rng);
+                float dy = RandomFloat(-1, 1, rng);
 
-            float newX = pos.x + dx * stepSize;
-            float newY = pos.y + dy * stepSize;
+                float newX = pos.x + dx * stepSize;
+                float newY = pos.y + dy * stepSize;
 
 
 
-            // Check if particle is out of bounds and correct position
-            if (newX < 0) {
-                newX = 0;
+                // Check if particle is out of bounds and correct position
+                if (newX < 0) {
+                    newX = 0;
+                }
+                else if (newX > screenWidth) {
+                    newX = screenWidth;
+                }
+                if (newY < 0) {
+                    newY = 0;
+                }
+                else if (newY > screenHeight) {
+                    newY = screenHeight;
+                }
+
+                pos.x = newX;
+                pos.y = newY;
             }
-            else if (newX > screenWidth) {
-                newX = screenWidth;
-            }
-            if (newY < 0) {
-                newY = 0;
-            }
-            else if (newY > screenHeight) {
-                newY = screenHeight;
-            }
+        }
+        else if (is3D) {
+            for (int i = 0; i < numSteps; i++) {
+                float dx = RandomFloat(-1, 1, rng);
+                float dy = RandomFloat(-1, 1, rng);
+                float dz = RandomFloat(-1, 1, rng);
 
-            pos.x = newX;
-            pos.y = newY;
+                float newX = pos3D.x + dx * stepSize;
+                float newY = pos3D.y + dy * stepSize;
+                float newZ = pos3D.z + dz * stepSize;
+
+
+
+                // Check if particle is out of bounds and correct position
+                if (newX < 0) {
+                    newX = 0;
+                }
+                else if (newX > screenWidth) {
+                    newX = screenWidth;
+                }
+                if (newY < 0) {
+                    newY = 0;
+                }
+                else if (newY > screenHeight) {
+                    newY = screenHeight;
+                }
+                if (newZ < 0) {
+                    newZ = 0;
+                }
+                else if (newZ > screenDepth) {
+                    newZ = screenDepth;
+                }
+
+                pos3D = { newX,newY,newZ };
+            }
         }
     }
 
@@ -88,6 +143,15 @@ float RandomFloat(float min, float max, std::mt19937& rng) {
     std::uniform_real_distribution<float> dist(min, max);
     return dist(rng);
 }
+
+float Vector3Distance(const Vector3& a, const Vector3& b) {
+    float dx = b.x - a.x;
+    float dy = b.y - a.y;
+    float dz = b.z - a.z;
+    return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+
 
 
 //---------------------------------------------------------------------------------------------------------------------------------
