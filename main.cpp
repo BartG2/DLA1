@@ -14,8 +14,9 @@ float RandomFloat(float min, float max, std::mt19937& rng);
 
 
 const int screenWidth = 2560, screenHeight = 1440, screenDepth = 2000, numThreads = 20;
-int startingNumParticles = 2000, startingClusterParticles = 1;
-float collisionDistance = 2.0;
+const int startingNumParticles = 200, startingAggregateParticles = 1, particleSize = 20;
+Vector3 particleSizeVector = { particleSize,particleSize,particleSize};
+float collisionDistance = 2.0, cameraMoveSpeed = 2.0f;
 
 std::mt19937 rng = CreateGeneratorWithTimeSeed();
 
@@ -23,106 +24,63 @@ std::mt19937 rng = CreateGeneratorWithTimeSeed();
 
 class Particle {
 public:
-    Vector2 pos;
-    Vector3 pos3D;
+    Vector3 pos;
     Color color;
-    bool isStuck, is3D;
+    bool isStuck;
 
-    Particle(float x, float y, Color col) {
-        pos = { x,y };
-        pos3D = { x,y,0 };
+    Particle(float x, float y, float z, Color col) {
+        pos = { x, y, z };
         color = col;
         isStuck = false;
-        is3D = false;
-    }
-    Particle(Vector2 position, Color col) {
-        pos = position;
-        color = col;
-        isStuck = false;
-        is3D = false;
     }
 
     Particle(Vector3 position, Color col) {
-        pos3D = position;
+        pos = position;
         color = col;
         isStuck = false;
-        is3D = true;
     }
 
     Particle() {
-        pos = { screenWidth - 10, screenHeight - 10 };
-        pos3D = { screenWidth - 10, screenHeight - 10, 0 };
+        pos = { screenWidth - 10, screenHeight - 10, 0 };
         color = WHITE;
         isStuck = false;
     }
 
     void RandomWalk(float stepSize, int numSteps) {
-        if (!is3D) {
-            for (int i = 0; i < numSteps; i++) {
-                float dx = RandomFloat(-1, 1, rng);
-                float dy = RandomFloat(-1, 1, rng);
+        for (int i = 0; i < numSteps; i++) {
+            float dx = RandomFloat(-1, 1, rng);
+            float dy = RandomFloat(-1, 1, rng);
+            float dz = RandomFloat(-1, 1, rng);
 
-                float newX = pos.x + dx * stepSize;
-                float newY = pos.y + dy * stepSize;
+            float newX = pos.x + dx * stepSize;
+            float newY = pos.y + dy * stepSize;
+            float newZ = pos.z + dz * stepSize;
 
-
-
-                // Check if particle is out of bounds and correct position
-                if (newX < 0) {
-                    newX = 0;
-                }
-                else if (newX > screenWidth) {
-                    newX = screenWidth;
-                }
-                if (newY < 0) {
-                    newY = 0;
-                }
-                else if (newY > screenHeight) {
-                    newY = screenHeight;
-                }
-
-                pos.x = newX;
-                pos.y = newY;
+            // Check if particle is out of bounds and correct position
+            if (newX < 0) {
+                newX = 0;
             }
-        }
-        else if (is3D) {
-            for (int i = 0; i < numSteps; i++) {
-                float dx = RandomFloat(-1, 1, rng);
-                float dy = RandomFloat(-1, 1, rng);
-                float dz = RandomFloat(-1, 1, rng);
-
-                float newX = pos3D.x + dx * stepSize;
-                float newY = pos3D.y + dy * stepSize;
-                float newZ = pos3D.z + dz * stepSize;
-
-
-
-                // Check if particle is out of bounds and correct position
-                if (newX < 0) {
-                    newX = 0;
-                }
-                else if (newX > screenWidth) {
-                    newX = screenWidth;
-                }
-                if (newY < 0) {
-                    newY = 0;
-                }
-                else if (newY > screenHeight) {
-                    newY = screenHeight;
-                }
-                if (newZ < 0) {
-                    newZ = 0;
-                }
-                else if (newZ > screenDepth) {
-                    newZ = screenDepth;
-                }
-
-                pos3D = { newX,newY,newZ };
+            else if (newX > screenWidth) {
+                newX = screenWidth;
             }
+            if (newY < 0) {
+                newY = 0;
+            }
+            else if (newY > screenHeight) {
+                newY = screenHeight;
+            }
+            if (newZ < 0) {
+                newZ = 0;
+            }
+            else if (newZ > screenDepth) {
+                newZ = screenDepth;
+            }
+
+            pos = { newX, newY, newZ };
         }
     }
-
 };
+
 
 //---------------------------------------------------------------------------------------------------------------------------------
 
@@ -161,24 +119,79 @@ int main() {
     InitWindow(screenWidth, screenHeight, "DLA");
     SetTargetFPS(100);
 
-    std::vector<Particle> FreeParticles(startingNumParticles,Particle(500,500,RED));
-    std::vector<Particle> ClusterParticles(startingClusterParticles,Particle(screenWidth/2.0,screenHeight/2.0,WHITE));
+    //std::vector<Particle> FreeParticles(startingNumParticles,Particle(500,500,RED));
+    //std::vector<Particle> AggregateParticles(startingAggregateParticles,Particle(screenWidth/2.0,screenHeight/2.0,WHITE));
 
-    Camera2D camera = { 0 };
+    std::vector<Particle> FreeParticles(startingNumParticles, Particle({screenWidth/3.0,screenHeight/3.0,screenDepth/3.0}, RED));
+    std::vector<Particle> AggregateParticles(startingAggregateParticles, Particle({ screenWidth / 2.0, screenHeight / 2.0, screenDepth/3.0 }, WHITE));
+
+    /*Camera2D camera = {0};
     camera.target = { screenWidth / 2.0f, screenHeight / 2.0f };
     camera.offset = { screenWidth / 2.0f, screenHeight / 2.0f };
     camera.rotation = 0.0f;
-    camera.zoom = 1.0f;
+    camera.zoom = 1.0f;*/
+
+
+    Camera3D camera = { 0 };
+    camera.position = { 0.0f, 0.0f, 10.0f };
+    camera.target = { screenWidth/2.0,screenHeight/2.0,screenDepth/2.0};
+    camera.up = { 0.0f, 1.0f, 0.0f };
+    camera.fovy = 100.0f;
+    camera.projection = CAMERA_PERSPECTIVE;
+
+    Vector2 lastMousePos = GetMousePosition();
+
+    //SetCameraMode(camera, CAMERA_FIRST_PERSON);
+    //SetCameraMoveControls(KEY_W, KEY_S, KEY_D, KEY_A, KEY_UP,KEY_DOWN);
 
     //main loop
     while (!WindowShouldClose()) {
+
+        // Check arrow keys input and move camera accordingly
+        if (IsKeyDown(KEY_RIGHT)) {
+            camera.position.z += cameraMoveSpeed;
+        }
+        if (IsKeyDown(KEY_LEFT)) {
+            camera.position.z -= cameraMoveSpeed;
+        }
+        if (IsKeyDown(KEY_UP)) {
+            camera.position.y += cameraMoveSpeed;
+        }
+        if (IsKeyDown(KEY_DOWN)) {
+            camera.position.y -= cameraMoveSpeed;
+        }
+        if (IsKeyDown(KEY_W)) {
+            camera.position.x += cameraMoveSpeed;
+        }
+        if (IsKeyDown(KEY_S)) {
+            camera.position.x -= cameraMoveSpeed;
+        }
+
+        /*// Panning camera with mouse
+        Vector2 currentMousePos = GetMousePosition();
+        float mouseDeltaX = currentMousePos.x - lastMousePos.x;
+        float mouseDeltaY = currentMousePos.y - lastMousePos.y;
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+            camera.target.x -= mouseDeltaX * cameraMoveSpeed;
+            camera.target.y += mouseDeltaY * cameraMoveSpeed;
+        }*/
+
+        float panSpeed = 5.0f;
+        Vector2 newMousePos = GetMousePosition();
+        Vector2 mouseDelta = { newMousePos.x - lastMousePos.x, newMousePos.y - lastMousePos.y };
+        if (IsMouseButtonDown(MOUSE_LEFT_BUTTON) || IsMouseButtonDown(MOUSE_RIGHT_BUTTON)) {
+            camera.target.x -= mouseDelta.x * panSpeed;
+            camera.target.y -= mouseDelta.y * panSpeed;
+        }
+        lastMousePos = newMousePos;
+
 
         for (int i = 0; i < FreeParticles.size(); i++) {
             FreeParticles[i].RandomWalk(1,2);
         }
 
-        for (int i = 0; i < ClusterParticles.size(); i++) {
-            //ClusterParticles[i].RandomWalk(1, 1);
+        for (int i = 0; i < AggregateParticles.size(); i++) {
+            //AggregateParticles[i].RandomWalk(1, 1);
         }
 
 
@@ -224,18 +237,31 @@ int main() {
         ClearBackground(BLACK);
         DrawFPS(20, 20);
 
-        BeginMode2D(camera);
+        /*BeginMode2D(camera);
         for (int i = 0; i < FreeParticles.size(); i++) {
             DrawRectangleV(FreeParticles[i].pos, { 2,2 }, FreeParticles[i].color);
-            //DrawPixelV(FreeParticles[i].pos, FreeParticles[i].color);
-            //DrawCircleV(FreeParticles[i].pos, 2, FreeParticles[i].color);
         }
 
-        for (int i = 0; i < ClusterParticles.size(); i++) {
-            //DrawCircleV(ClusterParticles[i].pos, 3, ClusterParticles[i].color);
-            DrawRectangleV(ClusterParticles[i].pos, { 2,2 }, ClusterParticles[i].color);
+        for (int i = 0; i < AggregateParticles.size(); i++) {
+            DrawRectangleV(AggregateParticles[i].pos, { 2,2 }, AggregateParticles[i].color);
         }
-        EndMode2D();
+        EndMode2D();*/
+
+        BeginMode3D(camera);
+
+        DrawPlane({ 0,0,0 }, { 3000,3000 }, PURPLE);
+        DrawPlane({ 0,1000,0 }, { 3000,3000 }, GREEN);
+        DrawCubeWiresV({ 0,0,0 }, { screenWidth,screenHeight,screenDepth }, ORANGE);
+
+        for (int i = 0; i < AggregateParticles.size(); i++) {
+            DrawCubeV(AggregateParticles[i].pos, particleSizeVector, AggregateParticles[i].color);
+        }
+
+        for (int i = 0; i < FreeParticles.size(); i++) {
+            DrawCubeV(FreeParticles[i].pos, particleSizeVector, FreeParticles[i].color);
+        }
+
+        EndMode3D();
 
 
         EndDrawing();
