@@ -15,6 +15,7 @@ float RandomFloat(float min, float max, std::mt19937& rng);
 
 const int screenWidth = 2560, screenHeight = 1440, numThreads = 20;
 int startingNumParticles = 20000, startingClusterParticles = 1;
+const float collisionThreshold = 4.0f;
 
 std::mt19937 rng = CreateGeneratorWithTimeSeed();
 
@@ -89,6 +90,14 @@ float RandomFloat(float min, float max, std::mt19937& rng) {
     return dist(rng);
 }
 
+float vector2distance(Vector2 v1, Vector2 v2) {
+    float dx = v2.x - v1.x;
+    float dy = v2.y - v1.y;
+    return std::sqrt(dx * dx + dy * dy);
+}
+
+void checkCollisions(){}
+
 
 //---------------------------------------------------------------------------------------------------------------------------------
 
@@ -97,7 +106,7 @@ int main() {
     InitWindow(screenWidth, screenHeight, "DLA");
     SetTargetFPS(100);
 
-    std::vector<Particle> FreeParticles(startingNumParticles,Particle(500,500,RED));
+    std::vector<Particle> FreeParticles(startingNumParticles,Particle(700,700,RED));
     std::vector<Particle> ClusterParticles(startingClusterParticles,Particle(screenWidth/2.0,screenHeight/2.0,WHITE));
 
     Camera2D camera = { 0 };
@@ -109,11 +118,31 @@ int main() {
     //main loop
     while (!WindowShouldClose()) {
 
-        for (int i = 0; i < FreeParticles.size(); i++) {
+            // Loop through each free particle
+    for (long long unsigned int i = 0; i < FreeParticles.size(); i++) {
+        FreeParticles[i].RandomWalk(1,2);
+
+        // Loop through each cluster particle to check for collisions
+        for (long long unsigned int j = 0; j < ClusterParticles.size(); j++) {
+            // Calculate the distance between the free particle and the cluster particle
+            float distance = vector2distance(FreeParticles[i].pos, ClusterParticles[j].pos);
+
+            // If the distance is less than the collision threshold, the free particle is stuck
+            if (distance < collisionThreshold) {
+                FreeParticles[i].isStuck = true;
+                FreeParticles[i].color = WHITE;
+                ClusterParticles.push_back(FreeParticles[i]);
+                FreeParticles.erase(FreeParticles.begin() + i);
+                break;
+            }
+        }
+    }
+
+        for (long long unsigned int i = 0; i < FreeParticles.size(); i++) {
             FreeParticles[i].RandomWalk(1,2);
         }
 
-        for (int i = 0; i < ClusterParticles.size(); i++) {
+        for (long long unsigned int i = 0; i < ClusterParticles.size(); i++) {
             //ClusterParticles[i].RandomWalk(1, 1);
         }
 
@@ -155,19 +184,21 @@ int main() {
         // Replace the old FreeParticles vector with the new one
         FreeParticles = newParticles;
 
+
+
         BeginDrawing();
 
         ClearBackground(BLACK);
         DrawFPS(20, 20);
 
         BeginMode2D(camera);
-        for (int i = 0; i < FreeParticles.size(); i++) {
+        for (long long unsigned int i = 0; i < FreeParticles.size(); i++) {
             DrawRectangleV(FreeParticles[i].pos, { 2,2 }, FreeParticles[i].color);
             //DrawPixelV(FreeParticles[i].pos, FreeParticles[i].color);
             //DrawCircleV(FreeParticles[i].pos, 2, FreeParticles[i].color);
         }
 
-        for (int i = 0; i < ClusterParticles.size(); i++) {
+        for (long long unsigned int i = 0; i < ClusterParticles.size(); i++) {
             //DrawCircleV(ClusterParticles[i].pos, 3, ClusterParticles[i].color);
             DrawRectangleV(ClusterParticles[i].pos, { 2,2 }, ClusterParticles[i].color);
         }
