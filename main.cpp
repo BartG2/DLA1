@@ -4,6 +4,9 @@
 #include <iostream>
 #include <vector>
 #include <future>
+#include <omp.h>
+//#include <cuda_runtime.h>
+//#include <device_launch_parameters.h>
 
 //---------------------------------------------------------------------------------------------------------------------------------
 
@@ -96,7 +99,54 @@ float vector2distance(Vector2 v1, Vector2 v2) {
     return std::sqrt(dx * dx + dy * dy);
 }
 
-void checkCollisions(){}
+/*__global__ void vector2distanceKernel(Vector2* v1, Vector2* v2, float* result)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    float dx = v2[idx].x - v1[idx].x;
+    float dy = v2[idx].y - v1[idx].y;
+    result[idx] = sqrtf(dx * dx + dy * dy);
+}*/
+
+/*void vector2distanceCUDA(std::vector<Vector2>& v1, std::vector<Vector2>& v2, std::vector<float>& result)
+{
+    const int size = v1.size();
+    Vector2* d_v1;
+    Vector2* d_v2;
+    float* d_result;
+
+    cudaMalloc((void**)&d_v1, size * sizeof(Vector2));
+    cudaMalloc((void**)&d_v2, size * sizeof(Vector2));
+    cudaMalloc((void**)&d_result, size * sizeof(float));
+
+    cudaMemcpy(d_v1, v1.data(), size * sizeof(Vector2), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_v2, v2.data(), size * sizeof(Vector2), cudaMemcpyHostToDevice);
+
+    const int threadsPerBlock = 256;
+    const int blocksPerGrid = (size + threadsPerBlock - 1) / threadsPerBlock;
+
+    vector2distanceKernel<<<blocksPerGrid, threadsPerBlock>>>(d_v1, d_v2, d_result);
+
+    result.resize(size);
+    cudaMemcpy(result.data(), d_result, size * sizeof(float), cudaMemcpyDeviceToHost);
+
+    cudaFree(d_v1);
+    cudaFree(d_v2);
+    cudaFree(d_result);
+}*/
+
+std::vector<Particle> CreateCircle(int numParticles, Color col, Vector2 center, float radius){
+    float degreeIncrement = 360.0f/(float)numParticles;
+    std::vector<Particle> particles;
+
+    for(float i = 0; i < 360; i += degreeIncrement){
+        float x = radius * cos(i) + center.x;
+        float y = radius * sin(i) + center.y;
+        Particle p(x,y,col);
+        particles.push_back(p);
+    }
+
+    return particles;
+}
 
 
 //---------------------------------------------------------------------------------------------------------------------------------
@@ -106,7 +156,8 @@ int main() {
     InitWindow(screenWidth, screenHeight, "DLA");
     SetTargetFPS(100);
 
-    std::vector<Particle> FreeParticles(startingNumParticles,Particle(700,700,RED));
+    //std::vector<Particle> FreeParticles(startingNumParticles,Particle(1000,700,RED));
+    std::vector<Particle> FreeParticles = CreateCircle(50000,RED,{screenWidth/2.0,screenHeight/2.0}, 500);
     std::vector<Particle> ClusterParticles(startingClusterParticles,Particle(screenWidth/2.0,screenHeight/2.0,WHITE));
 
     Camera2D camera = { 0 };
@@ -118,25 +169,22 @@ int main() {
     //main loop
     while (!WindowShouldClose()) {
 
-            // Loop through each free particle
-    for (long long unsigned int i = 0; i < FreeParticles.size(); i++) {
-        FreeParticles[i].RandomWalk(1,2);
+        #pragma omp parallel for
+        for (long long unsigned int i = 0; i < FreeParticles.size(); i++) {
+            FreeParticles[i].RandomWalk(1,2);
 
-        // Loop through each cluster particle to check for collisions
-        for (long long unsigned int j = 0; j < ClusterParticles.size(); j++) {
-            // Calculate the distance between the free particle and the cluster particle
-            float distance = vector2distance(FreeParticles[i].pos, ClusterParticles[j].pos);
+            for (long long unsigned int j = 0; j < ClusterParticles.size(); j++) {
+                float distance = vector2distance(FreeParticles[i].pos, ClusterParticles[j].pos);
 
-            // If the distance is less than the collision threshold, the free particle is stuck
-            if (distance < collisionThreshold) {
-                FreeParticles[i].isStuck = true;
-                FreeParticles[i].color = WHITE;
-                ClusterParticles.push_back(FreeParticles[i]);
-                FreeParticles.erase(FreeParticles.begin() + i);
-                break;
+                if (distance < collisionThreshold) {
+                    FreeParticles[i].isStuck = true;
+                    FreeParticles[i].color = WHITE;
+                    ClusterParticles.push_back(FreeParticles[i]);
+                    FreeParticles.erase(FreeParticles.begin() + i);
+                    break;
+                }
             }
         }
-    }
 
         for (long long unsigned int i = 0; i < FreeParticles.size(); i++) {
             FreeParticles[i].RandomWalk(1,2);
