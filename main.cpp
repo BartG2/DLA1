@@ -87,28 +87,33 @@ public:
         :boundary(boundary)
     {}
 
-    void Insert(Particle p) {
-        if (!CheckCollisionPointRec(p.pos, boundary)) {
+    void Insert(const Particle& p) {
+        bool isCollision = CheckCollisionPointRec(p.pos, boundary);
+        if (!isCollision) {
             return;
         }
 
         if (particles.size() < capacity) {
             particles.push_back(p);
+            return;
         }
-        else if (treeDepth < maxTreeDepth) {
+
+        if (treeDepth < maxTreeDepth) {
             if (!isDivided) {
                 Divide();
                 isDivided = true;
             }
 
-            for (int i = 0; i < 4; i++) {
-                children[i]->Insert(p);
-            }
+            children[0]->Insert(p);
+            children[1]->Insert(p);
+            children[2]->Insert(p);
+            children[3]->Insert(p);
         }
         else {
             particles.push_back(p);
         }
     }
+
 
     void Divide() {
         //in order of unit circle quadrants
@@ -320,10 +325,10 @@ int main() {
 
         auto start = std::chrono::high_resolution_clock::now();
         for(long long unsigned int i = 0; i < FreeParticles.size(); i++){
-            qt.Insert(FreeParticles[i]);
+            const Particle& p = FreeParticles[i];
+            qt.Insert(p);
         }
         auto end = std::chrono::high_resolution_clock::now();
-
         std::chrono::duration<float> insertDuration = end - start;
 
 
