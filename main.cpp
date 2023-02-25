@@ -5,6 +5,7 @@
 #include <vector>
 #include <future>
 #include <omp.h>
+#include <array>
 //#include <cuda_runtime.h>
 //#include <device_launch_parameters.h>
 
@@ -18,7 +19,8 @@ float RandomFloat(float min, float max, std::mt19937& rng);
 
 const int screenWidth = 2560, screenHeight = 1440, numThreads = 20;
 int startingNumParticles = 20000, startingClusterParticles = 1;
-const float collisionThreshold = 4.0f;
+const float collisionThreshold = 3.5f;
+Vector2 particleSize = {2,2};
 
 std::mt19937 rng = CreateGeneratorWithTimeSeed();
 
@@ -30,17 +32,13 @@ public:
     Color color;
     bool isStuck;
 
-    Particle(float x, float y, Color col) {
-        pos = { x,y };
-        color = col;
-        isStuck = false;
-    }
+    Particle(float x, float y, Color col)
+        :pos({x,y}), color(col)
+    {}
 
-    Particle() {
-        pos = { screenWidth - 10, screenHeight - 10 };
-        color = WHITE;
-        isStuck = false;
-    }
+    Particle()
+        :pos({ screenWidth - 10, screenHeight - 10 }), color(WHITE), isStuck(false)
+    {}
 
     void RandomWalk(float stepSize, int numSteps) {
         for (int i = 0; i < numSteps; i++) {
@@ -71,6 +69,74 @@ public:
         }
     }
 
+};
+
+class QuadTree {
+public:
+    Rectangle boundary;
+    const static int capacity = 10;
+    const static int maxTreeDepth = 5;
+    int treeDepth = 0;
+    bool isDivided = false;
+    std::vector<Particle> particles;
+    std::array<QuadTree, 4> children;   //quadrants labeled as in unit circle
+
+    QuadTree(Rectangle boundary)
+        :boundary(boundary)
+    {}
+
+    void Insert(Particle p) {
+        if (!CheckCollisionPointRec(p.pos, boundary)) {
+            return;
+        }
+
+        if (particles.size() < capacity) {
+            particles.push_back(p);
+        }
+        else if (treeDepth < maxTreeDepth) {
+            if (!isDivided) {
+                Divide();
+                isDivided = true;
+            }
+
+            for (auto& child : children) {
+                child.Insert(p);
+            }
+        }
+        else {
+            particles.push_back(p);
+        }
+    }
+
+    void Divide() {
+        //in order of unit circle quadrants
+        children[0] = QuadTree(Rectangle{ boundary.x + (boundary.width / 2.0f), boundary.y, boundary.width / 2.0f, boundary.height / 2.0f });
+        children[1] = QuadTree(Rectangle{ boundary.x, boundary.y, boundary.width / 2.0f, boundary.height / 2.0f });
+        children[2] = QuadTree(Rectangle{ boundary.x, boundary.y + (boundary.height / 2.0f), boundary.width / 2.0f, boundary.height / 2.0f });
+        children[3] = QuadTree(Rectangle{ boundary.x + (boundary.width / 2.0f), boundary.y + (boundary.height / 2.0f), boundary.width / 2.0f, boundary.height / 2.0f });
+
+        for (auto& child : children) {
+            child.treeDepth = treeDepth + 1;
+        }
+    }
+
+    void Draw() {
+        BeginDrawing();
+
+        DrawRectangleLinesEx(boundary, 1, BLACK);
+
+        /*for (auto& p : particles) {
+            DrawRectangleV(p.pos, particleSize, p.color);
+        }*/
+
+        EndDrawing();
+
+        if (isDivided) {
+            for (auto& child : children) {
+                child.Draw();
+            }
+        }
+    }
 };
 
 //---------------------------------------------------------------------------------------------------------------------------------
@@ -157,7 +223,8 @@ int main() {
     SetTargetFPS(100);
 
     //std::vector<Particle> FreeParticles(startingNumParticles,Particle(1000,700,RED));
-    std::vector<Particle> FreeParticles = CreateCircle(50000,RED,{screenWidth/2.0,screenHeight/2.0}, 500);
+    //std::vector<Particle> FreeParticles = CreateCircle(50000,RED,{screenWidth/2.0,screenHeight/2.0}, 500);
+    std::vector<Particle> FreeParticles(1000, Particle(RandomFloat(0,screenWidth, rng),RandomFloat(0,screenHeight, rng), RED));     //random particles
     std::vector<Particle> ClusterParticles(startingClusterParticles,Particle(screenWidth/2.0,screenHeight/2.0,WHITE));
 
     Camera2D camera = { 0 };
@@ -170,31 +237,24 @@ int main() {
     while (!WindowShouldClose()) {
 
         #pragma omp parallel for
-        for (long long unsigned int i = 0; i < FreeParticles.size(); i++) {
+        for(long long unsigned int i = 0; i < FreeParticles.size(); i++){
             FreeParticles[i].RandomWalk(1,2);
+        }
 
-            for (long long unsigned int j = 0; j < ClusterParticles.size(); j++) {
-                float distance = vector2distance(FreeParticles[i].pos, ClusterParticles[j].pos);
+        #pragma omp parallel for
+        for (long long unsigned int i = 0; i < ClusterParticles.size(); i++){
+            for(long long unsigned int j = 0; j < FreeParticles.size(); j++){
+                float distance = vector2distance(ClusterParticles[i].pos, FreeParticles[j].pos);
 
                 if (distance < collisionThreshold) {
-                    FreeParticles[i].isStuck = true;
-                    FreeParticles[i].color = WHITE;
-                    ClusterParticles.push_back(FreeParticles[i]);
-                    FreeParticles.erase(FreeParticles.begin() + i);
+                    FreeParticles[j].isStuck = true;
+                    FreeParticles[j].color = WHITE;
+                    ClusterParticles.push_back(FreeParticles[j]);
+                    FreeParticles.erase(FreeParticles.begin() + j);
                     break;
                 }
             }
         }
-
-        for (long long unsigned int i = 0; i < FreeParticles.size(); i++) {
-            FreeParticles[i].RandomWalk(1,2);
-        }
-
-        for (long long unsigned int i = 0; i < ClusterParticles.size(); i++) {
-            //ClusterParticles[i].RandomWalk(1, 1);
-        }
-
-
 
         // Split the FreeParticles vector into smaller chunks
         int chunkSize = FreeParticles.size() / numThreads;
@@ -232,6 +292,11 @@ int main() {
         // Replace the old FreeParticles vector with the new one
         FreeParticles = newParticles;
 
+        QuadTree qt(Rectangle{0,0,screenWidth,screenHeight});
+        for(long long unsigned int i = 0; i < FreeParticles.size(); i++){
+            qt.Insert(FreeParticles[i]);
+        }
+        qt.Draw();
 
 
         BeginDrawing();
@@ -242,12 +307,9 @@ int main() {
         BeginMode2D(camera);
         for (long long unsigned int i = 0; i < FreeParticles.size(); i++) {
             DrawRectangleV(FreeParticles[i].pos, { 2,2 }, FreeParticles[i].color);
-            //DrawPixelV(FreeParticles[i].pos, FreeParticles[i].color);
-            //DrawCircleV(FreeParticles[i].pos, 2, FreeParticles[i].color);
         }
 
         for (long long unsigned int i = 0; i < ClusterParticles.size(); i++) {
-            //DrawCircleV(ClusterParticles[i].pos, 3, ClusterParticles[i].color);
             DrawRectangleV(ClusterParticles[i].pos, { 2,2 }, ClusterParticles[i].color);
         }
         EndMode2D();
