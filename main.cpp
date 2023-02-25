@@ -102,7 +102,7 @@ public:
             }
 
             // Parallelize the loop with OpenMP
-            #pragma omp parallel for
+            //#pragma omp parallel for
             for (int i = 0; i < 4; i++) {
                 children[i]->Insert(p);
             }
@@ -228,7 +228,7 @@ int main() {
     omp_set_num_threads(20);
 
     //std::vector<Particle> FreeParticles(startingNumParticles,Particle(1000,700,RED));
-    std::vector<Particle> FreeParticles = CreateCircle(1000,RED,{screenWidth/2.0,screenHeight/2.0}, 500);
+    std::vector<Particle> FreeParticles = CreateCircle(10000,RED,{screenWidth/2.0,screenHeight/2.0}, 500);
     //std::vector<Particle> FreeParticles(1000, Particle(RandomFloat(0,screenWidth, rng),RandomFloat(0,screenHeight, rng), RED));     //random particles
     std::vector<Particle> ClusterParticles(startingClusterParticles,Particle(screenWidth/2.0,screenHeight/2.0,WHITE));
 
@@ -241,12 +241,12 @@ int main() {
     //main loop
     while (!WindowShouldClose()) {
 
-        #pragma omp parallel for
+        /*#pragma omp parallel for
         for(long long unsigned int i = 0; i < FreeParticles.size(); i++){
             FreeParticles[i].RandomWalk(1,2);
-        }
+        }*/
 
-        #pragma omp parallel for
+        /*#pragma omp parallel for
         for (long long unsigned int i = 0; i < ClusterParticles.size(); i++){
             for(long long unsigned int j = 0; j < FreeParticles.size(); j++){
                 float distance = vector2distance(ClusterParticles[i].pos, FreeParticles[j].pos);
@@ -259,7 +259,7 @@ int main() {
                     break;
                 }
             }
-        }
+        }*/
 
         // Split the FreeParticles vector into smaller chunks
         int chunkSize = FreeParticles.size() / numThreads;
