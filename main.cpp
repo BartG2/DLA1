@@ -6,6 +6,7 @@
 #include <future>
 #include <omp.h>
 #include <array>
+#include <mutex>
 //#include <cuda_runtime.h>
 //#include <device_launch_parameters.h>
 
@@ -78,8 +79,11 @@ public:
     const static int maxTreeDepth = 6;
     int treeDepth = 0;
     bool isDivided = false;
-    std::vector<Particle> particles;
+    //std::vector<Particle*> particles;
+    std::vector<std::reference_wrapper<Particle>> particles;
     std::array<std::unique_ptr<QuadTree>, 4> children;   //quadrants labeled as in unit circle
+
+    std::mutex particlesMutex;
 
     float halfWidth = boundary.width/2.0f, halfHeight = boundary.height/2.0f;
 
@@ -87,11 +91,13 @@ public:
         :boundary(boundary)
     {}
 
-    void Insert(const Particle& p) {
+    void Insert(Particle& p) {
         bool isCollision = CheckCollisionPointRec(p.pos, boundary);
         if (!isCollision) {
             return;
         }
+
+        std::lock_guard<std::mutex> lock(particlesMutex);  // acquire mutex lock
 
         if (particles.size() < capacity) {
             particles.push_back(p);
@@ -114,6 +120,33 @@ public:
         }
     }
 
+    void InsertBatch(std::vector<Particle>& particles) {
+    for (Particle& p : particles) {
+        Insert(p);
+        }
+    }
+
+    void InsertParticles(std::vector<Particle>& particles) {
+        const int batchSize = 1000;
+        const int numBatches = (particles.size() + batchSize - 1) / batchSize;
+
+        std::vector<std::future<void>> futures;
+        futures.reserve(numBatches);
+
+        for (int i = 0; i < numBatches; i++) {
+            int startIndex = i * batchSize;
+            int endIndex = std::min(startIndex + batchSize, static_cast<int>(particles.size()));
+
+            std::vector<Particle> batch(particles.begin() + startIndex, particles.begin() + endIndex);
+
+            futures.push_back(std::async(std::launch::async, &InsertBatch, std::move(batch)));
+        }
+
+        for (auto& future : futures) {
+            future.get();
+        }
+    }
+
 
     void Divide() {
         //in order of unit circle quadrants
@@ -122,6 +155,13 @@ public:
         children[2] = std::make_unique<QuadTree>(Rectangle{ boundary.x, boundary.y + halfHeight, halfWidth, halfHeight });
         children[3] = std::make_unique<QuadTree>(Rectangle{ boundary.x + halfWidth, boundary.y + halfHeight, halfWidth, halfHeight });
 
+        for (auto& p : particles) {
+            for (auto& child : children) {
+                child->Insert(p);
+            }
+        }
+
+        particles.clear();
 
         for (auto& child : children) {
             child->treeDepth = treeDepth + 1;
@@ -133,13 +173,11 @@ public:
 
         auto start = std::chrono::high_resolution_clock::now();
 
-
-        for(long long unsigned int i = 0; i < particles.size(); i++){
-            DrawPixelV(particles[i].pos,particles[i].color);
+        for (auto& p : particles) {
+            DrawPixelV(p.get().pos, p.get().color);
         }
-        
-        DrawRectangleLinesEx(boundary, 1, GREEN);
 
+        DrawRectangleLinesEx(boundary, 1, GREEN);
 
         if (isDivided) {
             for (auto& child : children) {
@@ -154,6 +192,7 @@ public:
         return duration;
     }
 };
+
 
 //---------------------------------------------------------------------------------------------------------------------------------
 
@@ -325,8 +364,9 @@ int main() {
 
         auto start = std::chrono::high_resolution_clock::now();
         for(long long unsigned int i = 0; i < FreeParticles.size(); i++){
-            const Particle& p = FreeParticles[i];
-            qt.Insert(p);
+            //const Particle& p = FreeParticles[i];
+            //Particle *p = &FreeParticles[i];
+            qt.Insert(FreeParticles[i]);
         }
         auto end = std::chrono::high_resolution_clock::now();
         std::chrono::duration<float> insertDuration = end - start;
