@@ -228,7 +228,7 @@ int main() {
     omp_set_num_threads(20);
 
     //std::vector<Particle> FreeParticles(startingNumParticles,Particle(1000,700,RED));
-    std::vector<Particle> FreeParticles = CreateCircle(10,RED,{screenWidth/2.0,screenHeight/2.0}, 500);
+    std::vector<Particle> FreeParticles = CreateCircle(1000,RED,{screenWidth/2.0,screenHeight/2.0}, 500);
     //std::vector<Particle> FreeParticles(1000, Particle(RandomFloat(0,screenWidth, rng),RandomFloat(0,screenHeight, rng), RED));     //random particles
     std::vector<Particle> ClusterParticles(startingClusterParticles,Particle(screenWidth/2.0,screenHeight/2.0,WHITE));
 
@@ -308,11 +308,11 @@ int main() {
         ClearBackground(BLACK);
         DrawFPS(20, 20);
 
-        #pragma omp parallel for
+        /*//#pragma omp parallel for
         for (long long unsigned int i = 0; i < FreeParticles.size(); i++) {
             DrawRectangleV(FreeParticles[i].pos, { 2,2 }, FreeParticles[i].color);
-        }
-        #pragma omp parallel for
+        }*/
+        //#pragma omp parallel for
         for (long long unsigned int i = 0; i < ClusterParticles.size(); i++) {
             DrawRectangleV(ClusterParticles[i].pos, { 2,2 }, ClusterParticles[i].color);
         }
