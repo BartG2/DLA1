@@ -80,7 +80,8 @@ public:
     bool isDivided = false;
     std::vector<Particle> particles;
     std::array<std::unique_ptr<QuadTree>, 4> children;   //quadrants labeled as in unit circle
-    //std::vector<Vector2> particlePositions;  // cache of particle positions
+
+    float halfWidth = boundary.width/2.0f, halfHeight = boundary.height/2.0f;
 
     QuadTree(Rectangle boundary)
         :boundary(boundary)
@@ -93,7 +94,6 @@ public:
 
         if (particles.size() < capacity) {
             particles.push_back(p);
-            //particlePositions.push_back(p.pos); // update cache
         }
         else if (treeDepth < maxTreeDepth) {
             if (!isDivided) {
@@ -101,24 +101,21 @@ public:
                 isDivided = true;
             }
 
-            // Parallelize the loop with OpenMP
-            //#pragma omp parallel for
             for (int i = 0; i < 4; i++) {
                 children[i]->Insert(p);
             }
         }
         else {
             particles.push_back(p);
-            //particlePositions.push_back(p.pos); // update cache
         }
     }
 
     void Divide() {
         //in order of unit circle quadrants
-        children[0] = std::make_unique<QuadTree>(Rectangle{ boundary.x + (boundary.width / 2.0f), boundary.y, boundary.width / 2.0f, boundary.height / 2.0f });
-        children[1] = std::make_unique<QuadTree>(Rectangle{ boundary.x, boundary.y, boundary.width / 2.0f, boundary.height / 2.0f });
-        children[2] = std::make_unique<QuadTree>(Rectangle{ boundary.x, boundary.y + (boundary.height / 2.0f), boundary.width / 2.0f, boundary.height / 2.0f });
-        children[3] = std::make_unique<QuadTree>(Rectangle{ boundary.x + (boundary.width / 2.0f), boundary.y + (boundary.height / 2.0f), boundary.width / 2.0f, boundary.height / 2.0f });
+        children[0] = std::make_unique<QuadTree>(Rectangle{ boundary.x + halfWidth, boundary.y, halfWidth, halfHeight });
+        children[1] = std::make_unique<QuadTree>(Rectangle{ boundary.x, boundary.y, halfWidth, halfHeight });
+        children[2] = std::make_unique<QuadTree>(Rectangle{ boundary.x, boundary.y + halfHeight, halfWidth, halfHeight });
+        children[3] = std::make_unique<QuadTree>(Rectangle{ boundary.x + halfWidth, boundary.y + halfHeight, halfWidth, halfHeight });
 
 
         for (auto& child : children) {
@@ -127,13 +124,7 @@ public:
     }
 
     void Draw() {
-        // Draw the cached particles
-        /*for (auto& p : particlePositions) {
-            DrawRectangleV(p, particleSize, particles[0].color);
-        }*/
-
         for(long long unsigned int i = 0; i < particles.size(); i++){
-            //DrawRectangleV(particles[i].pos,particleSize,particles[i].color);
             DrawPixelV(particles[i].pos,particles[i].color);
         }
         
@@ -142,7 +133,9 @@ public:
 
         if (isDivided) {
             for (auto& child : children) {
-                child->Draw();
+                if(child->particles.size() > 0){
+                    child->Draw();
+                }
             }
         }
     }
@@ -319,7 +312,7 @@ int main() {
         }*/
         //#pragma omp parallel for
         for (long long unsigned int i = 0; i < ClusterParticles.size(); i++) {
-            DrawRectangleV(ClusterParticles[i].pos, { 2,2 }, ClusterParticles[i].color);
+            //DrawRectangleV(ClusterParticles[i].pos, { 2,2 }, ClusterParticles[i].color);
             DrawPixelV(ClusterParticles[i].pos,ClusterParticles[i].color);
         }
         qt.Draw();
