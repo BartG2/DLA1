@@ -123,7 +123,12 @@ public:
         }
     }
 
-    void Draw() {
+    std::chrono::duration<float> Draw() {
+        using namespace std::literals::chrono_literals;
+
+        auto start = std::chrono::high_resolution_clock::now();
+
+
         for(long long unsigned int i = 0; i < particles.size(); i++){
             DrawPixelV(particles[i].pos,particles[i].color);
         }
@@ -138,6 +143,10 @@ public:
                 }
             }
         }
+
+        auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<float> duration = end - start;
+        return duration;
     }
 };
 
@@ -239,6 +248,8 @@ int main() {
     //main loop
     while (!WindowShouldClose()) {
 
+        auto startMainLoop = std::chrono::high_resolution_clock::now();
+
         /*#pragma omp parallel for
         for(long long unsigned int i = 0; i < FreeParticles.size(); i++){
             FreeParticles[i].RandomWalk(1,2);
@@ -259,6 +270,7 @@ int main() {
             }
         }*/
 
+        auto startVectorSplit = std::chrono::high_resolution_clock::now();
         // Split the FreeParticles vector into smaller chunks
         int chunkSize = FreeParticles.size() / numThreads;
         std::vector<std::vector<Particle>> particleChunks(numThreads);
@@ -292,13 +304,27 @@ int main() {
             newParticles.insert(newParticles.end(), result.begin(), result.end());
         }
 
+        auto endVectorSplit = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<float> vectorSplitDuration = endVectorSplit - startVectorSplit;
+
+        auto startVectorCopy = std::chrono::high_resolution_clock::now();
         // Replace the old FreeParticles vector with the new one
         FreeParticles = newParticles;
+        auto endVectorCopy = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<float> vectorCopyDuration = endVectorCopy - startVectorCopy;
 
+        auto startQT = std::chrono::high_resolution_clock::now();
         QuadTree qt(Rectangle{0,0,screenWidth,screenHeight});
+        auto endQT = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<float> qtDuration = endQT - startQT;
+
+        auto start = std::chrono::high_resolution_clock::now();
         for(long long unsigned int i = 0; i < FreeParticles.size(); i++){
             qt.Insert(FreeParticles[i]);
         }
+        auto end = std::chrono::high_resolution_clock::now();
+
+        std::chrono::duration<float> insertDuration = end - start;
 
 
         BeginDrawing();
@@ -315,11 +341,16 @@ int main() {
             //DrawRectangleV(ClusterParticles[i].pos, { 2,2 }, ClusterParticles[i].color);
             DrawPixelV(ClusterParticles[i].pos,ClusterParticles[i].color);
         }
-        qt.Draw();
+        std::chrono::duration<float> drawDuration = qt.Draw();
 
 
 
         EndDrawing();
+
+        auto endMainLoop = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<float> mainLoopDuration = endMainLoop - startMainLoop;
+
+        std::cout << "Main Loop: " << mainLoopDuration.count() << "\tInsert: " << insertDuration.count()/mainLoopDuration.count() << "\tDraw: " << drawDuration.count()/mainLoopDuration.count() << "\tQT: " << std::fixed << qtDuration.count()/mainLoopDuration.count() << "\tVectorCopy: " << vectorCopyDuration.count()/mainLoopDuration.count() << "\tVectorSplit: " << vectorSplitDuration.count()/mainLoopDuration.count() << "\tRemainder: " << 1.0 - vectorSplitDuration.count()/mainLoopDuration.count() - vectorCopyDuration.count()/mainLoopDuration.count() - qtDuration.count()/mainLoopDuration.count() - drawDuration.count()/mainLoopDuration.count() - insertDuration.count()/mainLoopDuration.count() << std::endl;
     }
 
     CloseWindow();
