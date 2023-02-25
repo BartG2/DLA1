@@ -74,13 +74,13 @@ public:
 class QuadTree {
 public:
     Rectangle boundary;
-    const static int capacity = 5;
-    const static int maxTreeDepth = 7;
+    const static int capacity = 40;
+    const static int maxTreeDepth = 6;
     int treeDepth = 0;
     bool isDivided = false;
     std::vector<Particle> particles;
     std::array<std::unique_ptr<QuadTree>, 4> children;   //quadrants labeled as in unit circle
-    std::vector<Vector2> particlePositions;  // cache of particle positions
+    //std::vector<Vector2> particlePositions;  // cache of particle positions
 
     QuadTree(Rectangle boundary)
         :boundary(boundary)
@@ -93,7 +93,7 @@ public:
 
         if (particles.size() < capacity) {
             particles.push_back(p);
-            particlePositions.push_back(p.pos); // update cache
+            //particlePositions.push_back(p.pos); // update cache
         }
         else if (treeDepth < maxTreeDepth) {
             if (!isDivided) {
@@ -109,7 +109,7 @@ public:
         }
         else {
             particles.push_back(p);
-            particlePositions.push_back(p.pos); // update cache
+            //particlePositions.push_back(p.pos); // update cache
         }
     }
 
@@ -128,8 +128,13 @@ public:
 
     void Draw() {
         // Draw the cached particles
-        for (auto& p : particlePositions) {
+        /*for (auto& p : particlePositions) {
             DrawRectangleV(p, particleSize, particles[0].color);
+        }*/
+
+        for(long long unsigned int i = 0; i < particles.size(); i++){
+            //DrawRectangleV(particles[i].pos,particleSize,particles[i].color);
+            DrawPixelV(particles[i].pos,particles[i].color);
         }
         
         DrawRectangleLinesEx(boundary, 1, GREEN);
@@ -228,7 +233,7 @@ int main() {
     omp_set_num_threads(20);
 
     //std::vector<Particle> FreeParticles(startingNumParticles,Particle(1000,700,RED));
-    std::vector<Particle> FreeParticles = CreateCircle(10000,RED,{screenWidth/2.0,screenHeight/2.0}, 500);
+    std::vector<Particle> FreeParticles = CreateCircle(100000,RED,{screenWidth/2.0,screenHeight/2.0}, 500);
     //std::vector<Particle> FreeParticles(1000, Particle(RandomFloat(0,screenWidth, rng),RandomFloat(0,screenHeight, rng), RED));     //random particles
     std::vector<Particle> ClusterParticles(startingClusterParticles,Particle(screenWidth/2.0,screenHeight/2.0,WHITE));
 
@@ -315,6 +320,7 @@ int main() {
         //#pragma omp parallel for
         for (long long unsigned int i = 0; i < ClusterParticles.size(); i++) {
             DrawRectangleV(ClusterParticles[i].pos, { 2,2 }, ClusterParticles[i].color);
+            DrawPixelV(ClusterParticles[i].pos,ClusterParticles[i].color);
         }
         qt.Draw();
 
