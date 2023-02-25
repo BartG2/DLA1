@@ -79,7 +79,7 @@ public:
     int treeDepth = 0;
     bool isDivided = false;
     std::vector<Particle> particles;
-    std::array<QuadTree, 4> children;   //quadrants labeled as in unit circle
+    std::array<std::unique_ptr<QuadTree>, 4> children;   //quadrants labeled as in unit circle
 
     QuadTree(Rectangle boundary)
         :boundary(boundary)
@@ -100,7 +100,7 @@ public:
             }
 
             for (auto& child : children) {
-                child.Insert(p);
+                child->Insert(p);
             }
         }
         else {
@@ -110,20 +110,21 @@ public:
 
     void Divide() {
         //in order of unit circle quadrants
-        children[0] = QuadTree(Rectangle{ boundary.x + (boundary.width / 2.0f), boundary.y, boundary.width / 2.0f, boundary.height / 2.0f });
-        children[1] = QuadTree(Rectangle{ boundary.x, boundary.y, boundary.width / 2.0f, boundary.height / 2.0f });
-        children[2] = QuadTree(Rectangle{ boundary.x, boundary.y + (boundary.height / 2.0f), boundary.width / 2.0f, boundary.height / 2.0f });
-        children[3] = QuadTree(Rectangle{ boundary.x + (boundary.width / 2.0f), boundary.y + (boundary.height / 2.0f), boundary.width / 2.0f, boundary.height / 2.0f });
+        children[0] = std::make_unique<QuadTree>(Rectangle{ boundary.x + (boundary.width / 2.0f), boundary.y, boundary.width / 2.0f, boundary.height / 2.0f });
+        children[1] = std::make_unique<QuadTree>(Rectangle{ boundary.x, boundary.y, boundary.width / 2.0f, boundary.height / 2.0f });
+        children[2] = std::make_unique<QuadTree>(Rectangle{ boundary.x, boundary.y + (boundary.height / 2.0f), boundary.width / 2.0f, boundary.height / 2.0f });
+        children[3] = std::make_unique<QuadTree>(Rectangle{ boundary.x + (boundary.width / 2.0f), boundary.y + (boundary.height / 2.0f), boundary.width / 2.0f, boundary.height / 2.0f });
+
 
         for (auto& child : children) {
-            child.treeDepth = treeDepth + 1;
+            child->treeDepth = treeDepth + 1;
         }
     }
 
     void Draw() {
         BeginDrawing();
 
-        DrawRectangleLinesEx(boundary, 1, BLACK);
+        DrawRectangleLinesEx(boundary, 1, GREEN);
 
         /*for (auto& p : particles) {
             DrawRectangleV(p.pos, particleSize, p.color);
@@ -133,7 +134,7 @@ public:
 
         if (isDivided) {
             for (auto& child : children) {
-                child.Draw();
+                child->Draw();
             }
         }
     }
@@ -223,8 +224,8 @@ int main() {
     SetTargetFPS(100);
 
     //std::vector<Particle> FreeParticles(startingNumParticles,Particle(1000,700,RED));
-    //std::vector<Particle> FreeParticles = CreateCircle(50000,RED,{screenWidth/2.0,screenHeight/2.0}, 500);
-    std::vector<Particle> FreeParticles(1000, Particle(RandomFloat(0,screenWidth, rng),RandomFloat(0,screenHeight, rng), RED));     //random particles
+    std::vector<Particle> FreeParticles = CreateCircle(500,RED,{screenWidth/2.0,screenHeight/2.0}, 500);
+    //std::vector<Particle> FreeParticles(1000, Particle(RandomFloat(0,screenWidth, rng),RandomFloat(0,screenHeight, rng), RED));     //random particles
     std::vector<Particle> ClusterParticles(startingClusterParticles,Particle(screenWidth/2.0,screenHeight/2.0,WHITE));
 
     Camera2D camera = { 0 };
