@@ -6,7 +6,6 @@
 #include <future>
 #include <omp.h>
 #include <array>
-#include <mutex>
 //#include <cuda_runtime.h>
 //#include <device_launch_parameters.h>
 
@@ -24,6 +23,8 @@ const float collisionThreshold = 3.5f;
 Vector2 particleSize = {2,2};
 
 std::mt19937 rng = CreateGeneratorWithTimeSeed();
+
+std::mutex particlesMutex;
 
 //---------------------------------------------------------------------------------------------------------------------------------
 
@@ -83,8 +84,6 @@ public:
     std::vector<std::reference_wrapper<Particle>> particles;
     std::array<std::unique_ptr<QuadTree>, 4> children;   //quadrants labeled as in unit circle
 
-    std::mutex particlesMutex;
-
     float halfWidth = boundary.width/2.0f, halfHeight = boundary.height/2.0f;
 
     QuadTree(Rectangle boundary)
@@ -97,11 +96,12 @@ public:
             return;
         }
 
-        std::lock_guard<std::mutex> lock(particlesMutex);  // acquire mutex lock
-
-        if (particles.size() < capacity) {
-            particles.push_back(p);
-            return;
+        {
+            std::lock_guard<std::mutex> lock(particlesMutex); // Lock the mutex
+            if (particles.size() < capacity) {
+                particles.push_back(p);        
+                return;
+            }
         }
 
         if (treeDepth < maxTreeDepth) {
@@ -116,7 +116,10 @@ public:
             children[3]->Insert(p);
         }
         else {
-            particles.push_back(p);
+            {
+                std::lock_guard<std::mutex> lock(particlesMutex); // Lock the mutex
+                particles.push_back(p);    
+            }
         }
     }
 
@@ -146,6 +149,7 @@ public:
             future.get();
         }
     }
+
 
 
     void Divide() {
