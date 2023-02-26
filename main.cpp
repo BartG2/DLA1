@@ -6,6 +6,7 @@
 #include <future>
 #include <omp.h>
 #include <array>
+#include <algorithm>
 //#include <cuda_runtime.h>
 //#include <device_launch_parameters.h>
 
@@ -50,8 +51,6 @@ public:
             float newX = pos.x + dx * stepSize;
             float newY = pos.y + dy * stepSize;
 
-
-
             // Check if particle is out of bounds and correct position
             if (newX < 0) {
                 newX = 0;
@@ -80,15 +79,41 @@ public:
     const static int maxTreeDepth = 6;
     int treeDepth = 0;
     bool isDivided = false;
-    //std::vector<Particle*> particles;
-    std::vector<std::reference_wrapper<Particle>> particles;
-    std::array<std::unique_ptr<QuadTree>, 4> children;   //quadrants labeled as in unit circle
+    const float halfWidth = boundary.width/2.0f, halfHeight = boundary.height/2.0f;
 
-    float halfWidth = boundary.width/2.0f, halfHeight = boundary.height/2.0f;
+    //std::vector<Particle*> particles;
+    std::vector<Particle> particles;
+    std::array<std::unique_ptr<QuadTree>, 4> children {nullptr,nullptr,nullptr,nullptr};   //quadrants labeled as in unit circle
 
     QuadTree(Rectangle boundary)
-        :boundary(boundary)
+        :boundary(boundary), children{nullptr,nullptr,nullptr,nullptr}
     {}
+
+    void InsertAllParticles(std::vector<Particle>& allParticles){
+
+    }
+
+    bool isLeaf(){
+        if(children[0] == nullptr){
+            return true;
+        }
+        return false;
+    }
+
+    void debugPrint(){
+        int count = 0;
+        for(int i = 0 ; i < 4; i++){
+            if(children[i]){
+                count++;
+            }
+        }
+        std::cout << "# stored particles: " << particles.size() << "\ton level: " << treeDepth << "\tand " << count << " non-null children" <<std::endl;
+        for(int i = 0 ; i < 4; i++){
+            if(children[i]){
+                children[i]->debugPrint();
+            }
+        }
+    }
 
     void Insert(Particle& p) {
         bool isCollision = CheckCollisionPointRec(p.pos, boundary);
@@ -123,33 +148,79 @@ public:
         }
     }
 
-    void InsertBatch(std::vector<Particle>& particles) {
-    for (Particle& p : particles) {
-        Insert(p);
+    /*std::vector<Particle> queryCircle(const Vector2& center, float radius) {
+        std::vector<Particle> results;
+
+        //std::cout << "Length 1: " << results.size() << std::endl;
+        
+        bool collides = CheckCollisionCircleRec(center, radius, boundary);
+        if (!collides) {
+            return results;
         }
+
+        //std::cout << "Length 2: " << results.size() << std::endl;
+
+        for (long long unsigned int i = 0; i < particles.size(); i++) {
+            if(this->isLeaf()){
+                if (CheckCollisionPointCircle(particles[i].pos, center, radius)) {
+                    Particle p {particles[i].pos.x, particles[i].pos.y, YELLOW};
+                    results.push_back(p);
+                    //std::cout << "Particle added: " << particles[i].pos.x << ", " << particles[i].pos.y << std::endl;
+                }
+            }
+        }
+
+        //std::cout << "Length 3: " << results.size() << std::endl;
+
+        if (!children[0]) {
+            return results;
+        }
+
+        //std::cout << "Length 4: " << results.size() << std::endl;
+
+        for (int i = 0; i < 4; i++) {
+            auto child_results = children[i]->queryCircle(center, radius);
+            if (!child_results.empty()) {
+                results.reserve(results.size() + child_results.size());
+                results.insert(results.end(), std::make_move_iterator(child_results.begin()),
+                            std::make_move_iterator(child_results.end()));
+            }
+        }
+
+        //std::cout << "Length 5: " << results.size() << std::endl;
+
+        for(unsigned int i = 0; i < results.size(); i++){
+            results[i].color = BLUE;
+        }
+
+        return results;
+    }*/
+
+    std::vector<Particle> queryCircle(const Vector2& center, float radius) {
+        std::vector<Particle> results;
+
+        // Check if the boundary intersects the circle
+        if (!CheckCollisionCircleRec(center, radius, boundary)) {
+            return results;
+        }
+
+        // Check each particle in this node
+        for (auto& p : particles) {
+            if (CheckCollisionPointCircle(p.pos, center, radius)) {
+                results.push_back(p);
+            }
+        }
+
+        // Recursively search each child node
+        if (isDivided) {
+            for (auto& child : children) {
+                auto childResults = child->queryCircle(center, radius);
+                results.insert(results.end(), childResults.begin(), childResults.end());
+            }
+        }
+
+        return results;
     }
-
-    void InsertParticles(std::vector<Particle>& particles) {
-        const int batchSize = 1000;
-        const int numBatches = (particles.size() + batchSize - 1) / batchSize;
-
-        std::vector<std::future<void>> futures;
-        futures.reserve(numBatches);
-
-        for (int i = 0; i < numBatches; i++) {
-            int startIndex = i * batchSize;
-            int endIndex = std::min(startIndex + batchSize, static_cast<int>(particles.size()));
-
-            std::vector<Particle> batch(particles.begin() + startIndex, particles.begin() + endIndex);
-
-            futures.push_back(std::async(std::launch::async, &InsertBatch, std::move(batch)));
-        }
-
-        for (auto& future : futures) {
-            future.get();
-        }
-    }
-
 
 
     void Divide() {
@@ -172,13 +243,22 @@ public:
         }
     }
 
+    void clear(){
+        particles.clear();
+        for(int i = 0; i < 4; i++){
+            if(children[i]){
+                children[i]->clear();
+            }
+        }
+    }
+
     std::chrono::duration<float> Draw() {
         using namespace std::literals::chrono_literals;
 
         auto start = std::chrono::high_resolution_clock::now();
 
         for (auto& p : particles) {
-            DrawPixelV(p.get().pos, p.get().color);
+            DrawPixelV(p.pos, p.color);
         }
 
         DrawRectangleLinesEx(boundary, 1, GREEN);
@@ -278,12 +358,14 @@ std::vector<Particle> CreateCircle(int numParticles, Color col, Vector2 center, 
 
 int main() {
 
+    float queryRadius = 100;
+
     InitWindow(screenWidth, screenHeight, "DLA");
     SetTargetFPS(100);
     omp_set_num_threads(20);
 
     //std::vector<Particle> FreeParticles(startingNumParticles,Particle(1000,700,RED));
-    std::vector<Particle> FreeParticles = CreateCircle(100000,RED,{screenWidth/2.0,screenHeight/2.0}, 500);
+    std::vector<Particle> FreeParticles = CreateCircle(1000,RED,{screenWidth/2.0,screenHeight/2.0}, queryRadius + 10);
     //std::vector<Particle> FreeParticles(1000, Particle(RandomFloat(0,screenWidth, rng),RandomFloat(0,screenHeight, rng), RED));     //random particles
     std::vector<Particle> ClusterParticles(startingClusterParticles,Particle(screenWidth/2.0,screenHeight/2.0,WHITE));
 
@@ -293,8 +375,10 @@ int main() {
     camera.rotation = 0.0f;
     camera.zoom = 1.0f;
 
+    QuadTree qt(Rectangle{0,0,screenWidth,screenHeight});
+
     //main loop
-    while (!WindowShouldClose()) {
+    for (int i = 0; !WindowShouldClose(); i++) {
 
         auto startMainLoop = std::chrono::high_resolution_clock::now();
 
@@ -362,7 +446,8 @@ int main() {
         std::chrono::duration<float> vectorCopyDuration = endVectorCopy - startVectorCopy;
 
         auto startQT = std::chrono::high_resolution_clock::now();
-        QuadTree qt(Rectangle{0,0,screenWidth,screenHeight});
+        //QuadTree qt(Rectangle{0,0,screenWidth,screenHeight});
+        qt.clear();
         auto endQT = std::chrono::high_resolution_clock::now();
         std::chrono::duration<float> qtDuration = endQT - startQT;
 
@@ -374,6 +459,14 @@ int main() {
         }
         auto end = std::chrono::high_resolution_clock::now();
         std::chrono::duration<float> insertDuration = end - start;
+
+        std::vector<Particle> centralPoints {qt.queryCircle({screenWidth/2.0,screenHeight/2.0}, queryRadius)};
+
+        for(unsigned int i = 0; i < centralPoints.size(); i++){
+            Particle p = centralPoints[i];
+            p.color = GREEN;
+            centralPoints[i] = p; 
+        }
 
 
         BeginDrawing();
@@ -392,6 +485,13 @@ int main() {
         }
         std::chrono::duration<float> drawDuration = qt.Draw();
 
+        DrawCircleLines(screenWidth/2.0, screenHeight/2.0, queryRadius, ORANGE);
+
+        for(long long unsigned int i = 0; i < centralPoints.size(); i++){
+            //DrawCircleV(centralPoints[i].pos,2,centralPoints[i].color);
+            DrawPixelV(centralPoints[i].pos,centralPoints[i].color);
+        }
+
 
 
         EndDrawing();
@@ -399,7 +499,11 @@ int main() {
         auto endMainLoop = std::chrono::high_resolution_clock::now();
         std::chrono::duration<float> mainLoopDuration = endMainLoop - startMainLoop;
 
-        std::cout << "Main Loop: " << mainLoopDuration.count() << "\tInsert: " << insertDuration.count()/mainLoopDuration.count() << "\tDraw: " << drawDuration.count()/mainLoopDuration.count() << "\tQT: " << std::fixed << qtDuration.count()/mainLoopDuration.count() << "\tVectorCopy: " << vectorCopyDuration.count()/mainLoopDuration.count() << "\tVectorSplit: " << vectorSplitDuration.count()/mainLoopDuration.count() << "\tRemainder: " << 1.0 - vectorSplitDuration.count()/mainLoopDuration.count() - vectorCopyDuration.count()/mainLoopDuration.count() - qtDuration.count()/mainLoopDuration.count() - drawDuration.count()/mainLoopDuration.count() - insertDuration.count()/mainLoopDuration.count() << std::endl;
+        if(i % 2000 == 0){
+            qt.debugPrint();
+        }
+
+        //std::cout << "Main Loop: " << mainLoopDuration.count() << "\tInsert: " << insertDuration.count()/mainLoopDuration.count() << "\tDraw: " << drawDuration.count()/mainLoopDuration.count() << "\tQT: " << std::fixed << qtDuration.count()/mainLoopDuration.count() << "\tVectorCopy: " << vectorCopyDuration.count()/mainLoopDuration.count() << "\tVectorSplit: " << vectorSplitDuration.count()/mainLoopDuration.count() << "\tRemainder: " << 1.0 - vectorSplitDuration.count()/mainLoopDuration.count() - vectorCopyDuration.count()/mainLoopDuration.count() - qtDuration.count()/mainLoopDuration.count() - drawDuration.count()/mainLoopDuration.count() - insertDuration.count()/mainLoopDuration.count() << std::endl;
     }
 
     CloseWindow();
