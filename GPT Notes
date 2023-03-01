@@ -1,0 +1,13 @@
+There are several ways to minimize the time complexity of the checkCollisionsMultiThread function:
+
+    Improve the queryCircle function in the QuadTree class to reduce the time complexity of collision detection. This can be done by optimizing the search algorithm used to find the particles within the circle.
+
+    Use a more efficient data structure than std::vector to store the particles in the FreeParticles vector. For example, a hash table or a balanced binary search tree could be used to provide faster searching and insertion.
+
+    Instead of removing particles from the FreeParticles vector one at a time using std::find_if and std::erase, use a more efficient data structure such as a hash table to track the particles that have been removed. This will reduce the time complexity of removing particles from the vector.
+
+    If the number of particles in the FreeParticles vector is expected to be large, consider using a parallel algorithm to remove particles from the vector. This can be done by dividing the vector into chunks and processing each chunk in parallel using multiple threads.
+
+    Consider optimizing the CheckCollisionPointCircle function to reduce the time complexity of collision detection. This can be done by using a more efficient algorithm or by optimizing the existing algorithm.
+
+    Reduce the number of threads used to handle collisions. If the number of threads is too large, it can lead to thread contention and slow down the overall performance of the function. Finding the optimal number of threads depends on the number of particles in the cluster, the number of CPU cores available, and the complexity of the collision detection algorithm.
