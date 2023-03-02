@@ -152,14 +152,14 @@ public:
 
 class QuadTree {
 private:
-    const int MAX_CAPACITY = 80; // Maximum number of particles in a node before dividing
+    const int MAX_CAPACITY = 800; // Maximum number of particles in a node before dividing
     const int MAX_LEVELS = 7; // Maximum depth of the QuadTree
 
     int level;
     Rectangle bounds;
+    
     std::vector<Particle> particles;
     std::array<std::unique_ptr<QuadTree>, 4> children;
-    //QuadTree* children[4];
 
     bool IsDivisible() {
         return level < MAX_LEVELS and particles.size() > MAX_CAPACITY;
@@ -178,7 +178,7 @@ private:
 
         for(unsigned int i = 0; i < particles.size(); i++){
             for(unsigned int j = 0; j < 4; j++){
-                if(CheckCollisionPointRec(particles[i].pos, bounds)){
+                if(CheckCollisionPointRec(particles[i].pos, children[j]->bounds)){
                     children[j]->Insert(particles[i]);
                     break;
                 }
@@ -187,6 +187,7 @@ private:
 
         particles.clear();
     }
+
 
 public:
     /*QuadTree(int level, Rectangle bounds)
@@ -204,7 +205,8 @@ public:
     ~QuadTree() {
         for (int i = 0; i < 4; i++) {
             if (children[i] != nullptr) {
-                delete children[i].release();
+                children[i] = nullptr;
+                //delete children[i].release();
             }
         }
     }
@@ -214,7 +216,11 @@ public:
             return;
         }
 
-        if (IsDivisible()) {
+        if (!IsDivisible()) {
+            particles.push_back(particle);
+            return;
+        }
+        else {
             if (children[0] == nullptr) {
                 Subdivide();
             }
@@ -222,9 +228,6 @@ public:
             for (int i = 0; i < 4; i++) {
                 children[i]->Insert(particle);
             }
-        }
-        else {
-            particles.push_back(particle);
         }
     }
 
@@ -292,16 +295,14 @@ public:
     }*/
 
     void Draw(){
-        /*DrawRectangleLinesEx(bounds, 0.5, GREEN);
+        DrawRectangleLinesEx(bounds, 0.5, GREEN);
+
         if(!IsDivisible()){
-            DrawText(TextFormat("%d", int(particles.size())), bounds.x + 2 * level, bounds.y + 2 * level, 1, GREEN);
-        }*/
-
-        for(unsigned int i = 0; i < particles.size(); i++){
-            DrawPixelV(particles[i].pos, particles[i].color);
+            for(unsigned int i = 0; i < particles.size(); i++){
+                DrawPixelV(particles[i].pos, particles[i].color);
+            }
         }
-
-        if(IsDivisible()){
+        else{
             for(int i = 0; i < 4; i++){
                 if(children[i] != nullptr){
                     children[i]->Draw();
@@ -368,7 +369,7 @@ int main() {
 
     InitWindow(screenWidth, screenHeight, "DLA");
     SetTargetFPS(100);
-    omp_set_num_threads(32);
+    //omp_set_num_threads(32);
 
     freeParticles = CreateCircle(400,RED,{screenWidth/2.0,screenHeight/2.0}, 40);
     aggregateParticles = {1, Particle(screenWidth / 2.0, screenHeight / 2.0, GREEN)};
@@ -378,7 +379,7 @@ int main() {
 
         //make concentric circles of particles
         if(frameCount / 5 < screenHeight / 2 and frameCount % 500 == 0){
-            std::vector<Particle> fp2 = CreateCircle(100 * (1 + frameCount / 50),RED,{screenWidth/2.0, screenHeight/2.0}, 60 + frameCount / 5);
+            std::vector<Particle> fp2 = CreateCircle(400 * (1 + frameCount / 50),RED,{screenWidth/2.0, screenHeight/2.0}, 60 + frameCount / 5);
             freeParticles.insert(freeParticles.end(), fp2.begin(), fp2.end());
         }
         //random walk for each
