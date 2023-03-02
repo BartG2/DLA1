@@ -88,7 +88,7 @@ public:
     bool isStuck;
 
     Particle(float x, float y, Color col)
-        :pos({x,y}), color(col)
+        :pos({x,y}), color(col), isStuck(false)
     {}
 
     Particle()
@@ -254,39 +254,9 @@ public:
             }
         }
 
-        for(auto& p : result){
-            p.color = BLUE;
-            p.isStuck = true;
-        }
 
         return result;
     }
-
-    /*std::vector<Particle> queryCircle(const Vector2& center, float radius) {
-        std::vector<Particle> results;
-
-        // Check if the boundary intersects the circle
-        if (!CheckCollisionCircleRec(center, radius, bounds)) {
-            return results;
-        }
-
-        // Check each particle in this node
-        for (auto& p : particles) {
-            if (CheckCollisionPointCircle(p.pos, center, radius)) {
-                results.push_back(p);
-            }
-        }
-
-        // Recursively search each child node
-        if (IsDivisible()) {
-            for (auto& child : children) {
-                auto childResults = child->queryCircle(center, radius);
-                results.insert(results.end(), childResults.begin(), childResults.end());
-            }
-        }
-
-        return results;
-    }*/
 
     void clear(){
         particles.clear();
@@ -423,22 +393,6 @@ int main() {
         for(unsigned int i = 0; i < freeParticles.size(); i++){
             qt.Insert(freeParticles[i]);
         }
-
-        //naive collision check
-        /*#pragma omp parallel for
-        for(unsigned int i = 0; i < aggregateParticles.size(); ++i){
-            for(unsigned int j = 0; j < freeParticles.size(); ++j){
-                if(CheckCollisionPointCircle(freeParticles[j].pos, aggregateParticles[i].pos, collisionThreshold)){
-                    freeParticles[j].isStuck = true;
-                    freeParticles[j].color = WHITE;
-                    #pragma omp critical
-                    {
-                        aggregateParticles.push_back(std::move(freeParticles[j]));
-                        freeParticles.erase(freeParticles.begin() + j);
-                    }
-                }
-            }
-        }*/
 
         BeginDrawing();
         {
