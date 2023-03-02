@@ -5,8 +5,14 @@
 #include <vector>
 #include <future>
 #include <omp.h>
-//#include <cuda_runtime.h>
-//#include <device_launch_parameters.h>
+#include <array>
+#include <algorithm>
+#include <unordered_set>
+#include <thread>
+#include <functional>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
 
 //---------------------------------------------------------------------------------------------------------------------------------
 
@@ -16,13 +22,64 @@ float RandomFloat(float min, float max, std::mt19937& rng);
 //---------------------------------------------------------------------------------------------------------------------------------
 
 
-const int screenWidth = 2560, screenHeight = 1440, numThreads = 20;
-int startingNumParticles = 20000, startingClusterParticles = 1;
-const float collisionThreshold = 4.0f;
+constexpr int screenWidth = 2560, screenHeight = 1440, numThreads = 2, maxTreeDepth = 7;
+const float collisionThreshold = 3.0f;
+
+const Vector2 particleSize = {2,2};
 
 std::mt19937 rng = CreateGeneratorWithTimeSeed();
 
 //---------------------------------------------------------------------------------------------------------------------------------
+
+class ThreadPool {
+public:
+    explicit ThreadPool(int threadPoolNumThreads) : stop(false) {
+        for (int i = 0; i < threadPoolNumThreads; ++i) {
+            threads.emplace_back([this] {
+                while (true) {
+                    std::function<void()> task;
+                    {
+                        std::unique_lock<std::mutex> lock(queueMutex);
+                        condition.wait(lock, [this] { return stop || !tasks.empty(); });
+                        if (stop && tasks.empty()) {
+                            return;
+                        }
+                        task = std::move(tasks.front());
+                        tasks.pop();
+                    }
+                    task();
+                }
+            });
+        }
+    }
+
+    ~ThreadPool() {
+        {
+            std::unique_lock<std::mutex> lock(queueMutex);
+            stop = true;
+        }
+        condition.notify_all();
+        for (auto& thread : threads) {
+            thread.join();
+        }
+    }
+
+    template<class F, class... Args>
+    void enqueue(F&& f, Args&&... args) {
+        {
+            std::unique_lock<std::mutex> lock(queueMutex);
+            tasks.emplace(std::bind(std::forward<F>(f), std::forward<Args>(args)...));
+        }
+        condition.notify_one();
+    }
+
+private:
+    std::vector<std::thread> threads;
+    std::queue<std::function<void()>> tasks;
+    std::mutex queueMutex;
+    std::condition_variable condition;
+    bool stop;
+};
 
 class Particle {
 public:
@@ -30,51 +87,268 @@ public:
     Color color;
     bool isStuck;
 
-    Particle(float x, float y, Color col) {
-        pos = { x,y };
-        color = col;
-        isStuck = false;
-    }
+    Particle(float x, float y, Color col)
+        :pos({x,y}), color(col)
+    {}
 
-    Particle() {
-        pos = { screenWidth - 10, screenHeight - 10 };
-        color = WHITE;
-        isStuck = false;
-    }
+    Particle()
+        :pos({ screenWidth - 10, screenHeight - 10 }), color(WHITE), isStuck(false)
+    {}
 
     void RandomWalk(float stepSize, int numSteps) {
-        for (int i = 0; i < numSteps; i++) {
-            float dx = RandomFloat(-1, 1, rng);
-            float dy = RandomFloat(-1, 1, rng);
+        if(!isStuck){
+            for (int i = 0; i < numSteps; i++) {
+                float dx = RandomFloat(-1, 1, rng);
+                float dy = RandomFloat(-1, 1, rng);
 
-            float newX = pos.x + dx * stepSize;
-            float newY = pos.y + dy * stepSize;
+                float newX = pos.x + dx * stepSize;
+                float newY = pos.y + dy * stepSize;
 
+                // Check if particle is out of bounds and correct position
+                if (newX < 0) {
+                    newX = 0;
+                }
+                else if (newX > screenWidth) {
+                    newX = screenWidth;
+                }
+                if (newY < 0) {
+                    newY = 0;
+                }
+                else if (newY > screenHeight) {
+                    newY = screenHeight;
+                }
 
-
-            // Check if particle is out of bounds and correct position
-            if (newX < 0) {
-                newX = 0;
+                pos.x = newX;
+                pos.y = newY;
             }
-            else if (newX > screenWidth) {
-                newX = screenWidth;
-            }
-            if (newY < 0) {
-                newY = 0;
-            }
-            else if (newY > screenHeight) {
-                newY = screenHeight;
-            }
-
-            pos.x = newX;
-            pos.y = newY;
         }
     }
 
 };
 
+class Timer{
+public:
+    std::chrono::time_point<std::chrono::high_resolution_clock> startPoint;
+
+    Timer(){
+        startPoint = std::chrono::high_resolution_clock::now();
+    }
+
+    ~Timer(){
+        stop();
+    }
+
+    void stop(){
+        auto endPoint = std::chrono::high_resolution_clock::now();
+        auto start = std::chrono::time_point_cast<std::chrono::microseconds>(startPoint).time_since_epoch().count();
+        auto end = std::chrono::time_point_cast<std::chrono::microseconds>(endPoint).time_since_epoch().count();
+
+        auto duration = end - start;
+        double ms = duration * 0.001;
+
+        std::cout << "ms: " << ms << std::endl;
+    }
+};
+
+class QuadTree {
+private:
+    const int MAX_CAPACITY = 80; // Maximum number of particles in a node before dividing
+    const int MAX_LEVELS = 7; // Maximum depth of the QuadTree
+
+    int level;
+    Rectangle bounds;
+    std::vector<Particle> particles;
+    std::array<std::unique_ptr<QuadTree>, 4> children;
+    //QuadTree* children[4];
+
+    bool IsDivisible() {
+        return level < MAX_LEVELS and particles.size() > MAX_CAPACITY;
+    }
+
+    void Subdivide() {
+        float x = bounds.x;
+        float y = bounds.y;
+        float w = bounds.width / 2.0f;
+        float h = bounds.height / 2.0f;
+
+        children[0] = std::make_unique<QuadTree>(level + 1, Rectangle{x, y, w, h});
+        children[1] = std::make_unique<QuadTree>(level + 1, Rectangle{x + w, y, w, h});
+        children[2] = std::make_unique<QuadTree>(level + 1, Rectangle{x + w, y + h, w, h});
+        children[3] = std::make_unique<QuadTree>(level + 1, Rectangle{x, y + h, w, h});
+
+        for(unsigned int i = 0; i < particles.size(); i++){
+            for(unsigned int j = 0; j < 4; j++){
+                if(CheckCollisionPointRec(particles[i].pos, bounds)){
+                    children[j]->Insert(particles[i]);
+                    break;
+                }
+            }
+        }
+
+        particles.clear();
+    }
+
+public:
+    QuadTree(int level, Rectangle bounds)
+        :level(level), bounds(bounds)
+    {
+        for (int i = 0; i < 4; i++) {
+            children[i] = nullptr;
+        }
+    }
+
+    ~QuadTree() {
+        for (int i = 0; i < 4; i++) {
+            if (children[i] != nullptr) {
+                delete children[i].release();
+            }
+        }
+    }
+
+    void Insert(Particle particle) {
+        if(!CheckCollisionPointRec(particle.pos, bounds)){
+            return;
+        }
+
+        if (IsDivisible()) {
+            if (children[0] == nullptr) {
+                Subdivide();
+            }
+
+            for (int i = 0; i < 4; i++) {
+                children[i]->Insert(particle);
+            }
+        }
+        else {
+            particles.push_back(particle);
+        }
+    }
+
+    std::vector<Particle> Query(const Vector2 center, const float radius) {
+        std::vector<Particle> result;
+
+        // Check if the node's bounds intersect with the circle
+        if (!CheckCollisionCircleRec(center, radius, bounds)) {
+            return result;
+        }
+
+        // If the node is not divisible, check each particle and add it to the result if it is inside the circle
+        if (!IsDivisible()) {
+            for (const auto& particle : particles) {
+                if (CheckCollisionPointCircle(particle.pos, center, radius)) {
+                    result.push_back(particle);
+                }
+            }
+        }
+        else {
+            // If the node is divisible, recursively query each child node and concatenate their results
+            for (const auto& child : children) {
+                if (child != nullptr) {
+                    std::vector<Particle> childResult = child->Query(center, radius);
+                    result.insert(result.end(), childResult.begin(), childResult.end());
+                }
+            }
+        }
+
+        for(auto& p : result){
+            p.color = BLUE;
+            p.isStuck = true;
+        }
+
+        return result;
+    }
+
+    /*std::vector<Particle> queryCircle(const Vector2& center, float radius) {
+        std::vector<Particle> results;
+
+        // Check if the boundary intersects the circle
+        if (!CheckCollisionCircleRec(center, radius, bounds)) {
+            return results;
+        }
+
+        // Check each particle in this node
+        for (auto& p : particles) {
+            if (CheckCollisionPointCircle(p.pos, center, radius)) {
+                results.push_back(p);
+            }
+        }
+
+        // Recursively search each child node
+        if (IsDivisible()) {
+            for (auto& child : children) {
+                auto childResults = child->queryCircle(center, radius);
+                results.insert(results.end(), childResults.begin(), childResults.end());
+            }
+        }
+
+        return results;
+    }*/
+
+    void clear(){
+        particles.clear();
+
+        if(children[0] != nullptr){
+            for(const auto& child : children){
+                child->clear();
+            }
+        }
+    }
+
+    /*std::vector<Particle> Query(const Rectangle& range) const {
+        std::vector<Particle> result;
+
+        if (!bounds.Intersects(range)) {
+            return result;
+        }
+
+        for (const auto& particle : particles) {
+            if (range.Contains(particle.pos)) {
+                result.push_back(particle);
+            }
+        }
+
+        if (children[0] != nullptr) {
+            for (int i = 0; i < 4; i++) {
+                auto childResult = children[i]->Query(range);
+                result.insert(result.end(), childResult.begin(), childResult.end());
+            }
+        }
+
+        return result;
+    }*/
+
+    void Draw(){
+        /*DrawRectangleLinesEx(bounds, 0.5, GREEN);
+        if(!IsDivisible()){
+            DrawText(TextFormat("%d", int(particles.size())), bounds.x + 2 * level, bounds.y + 2 * level, 1, GREEN);
+        }*/
+
+        for(unsigned int i = 0; i < particles.size(); i++){
+            DrawPixelV(particles[i].pos, particles[i].color);
+        }
+
+        if(IsDivisible()){
+            for(int i = 0; i < 4; i++){
+                children[i]->Draw();
+            }
+        }
+    }
+
+    int getTreeSize(){
+        int count = particles.size();
+        if(children[0] != nullptr){
+            for(const auto& child : children){
+                count += child->particles.size();
+            }
+        }
+        std::cout << count << std::endl;
+        return count;
+    }
+};
+
 //---------------------------------------------------------------------------------------------------------------------------------
 
+std::vector<Particle> freeParticles, aggregateParticles;
 
 //---------------------------------------------------------------------------------------------------------------------------------
 
@@ -99,41 +373,6 @@ float vector2distance(Vector2 v1, Vector2 v2) {
     return std::sqrt(dx * dx + dy * dy);
 }
 
-/*__global__ void vector2distanceKernel(Vector2* v1, Vector2* v2, float* result)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    float dx = v2[idx].x - v1[idx].x;
-    float dy = v2[idx].y - v1[idx].y;
-    result[idx] = sqrtf(dx * dx + dy * dy);
-}*/
-
-/*void vector2distanceCUDA(std::vector<Vector2>& v1, std::vector<Vector2>& v2, std::vector<float>& result)
-{
-    const int size = v1.size();
-    Vector2* d_v1;
-    Vector2* d_v2;
-    float* d_result;
-
-    cudaMalloc((void**)&d_v1, size * sizeof(Vector2));
-    cudaMalloc((void**)&d_v2, size * sizeof(Vector2));
-    cudaMalloc((void**)&d_result, size * sizeof(float));
-
-    cudaMemcpy(d_v1, v1.data(), size * sizeof(Vector2), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_v2, v2.data(), size * sizeof(Vector2), cudaMemcpyHostToDevice);
-
-    const int threadsPerBlock = 256;
-    const int blocksPerGrid = (size + threadsPerBlock - 1) / threadsPerBlock;
-
-    vector2distanceKernel<<<blocksPerGrid, threadsPerBlock>>>(d_v1, d_v2, d_result);
-
-    result.resize(size);
-    cudaMemcpy(result.data(), d_result, size * sizeof(float), cudaMemcpyDeviceToHost);
-
-    cudaFree(d_v1);
-    cudaFree(d_v2);
-    cudaFree(d_result);
-}*/
-
 std::vector<Particle> CreateCircle(int numParticles, Color col, Vector2 center, float radius){
     float degreeIncrement = 360.0f/(float)numParticles;
     std::vector<Particle> particles;
@@ -147,112 +386,68 @@ std::vector<Particle> CreateCircle(int numParticles, Color col, Vector2 center, 
 
     return particles;
 }
-
-
 //---------------------------------------------------------------------------------------------------------------------------------
 
 int main() {
 
     InitWindow(screenWidth, screenHeight, "DLA");
     SetTargetFPS(100);
+    omp_set_num_threads(32);
 
-    //std::vector<Particle> FreeParticles(startingNumParticles,Particle(1000,700,RED));
-    std::vector<Particle> FreeParticles = CreateCircle(50000,RED,{screenWidth/2.0,screenHeight/2.0}, 500);
-    std::vector<Particle> ClusterParticles(startingClusterParticles,Particle(screenWidth/2.0,screenHeight/2.0,WHITE));
-
-    Camera2D camera = { 0 };
-    camera.target = { screenWidth / 2.0f, screenHeight / 2.0f };
-    camera.offset = { screenWidth / 2.0f, screenHeight / 2.0f };
-    camera.rotation = 0.0f;
-    camera.zoom = 1.0f;
+    freeParticles = CreateCircle(400,RED,{screenWidth/2.0,screenHeight/2.0}, 40);
+    aggregateParticles = {1, Particle(screenWidth / 2.0, screenHeight / 2.0, GREEN)};
 
     //main loop
-    while (!WindowShouldClose()) {
+    for (int i = 0; !WindowShouldClose(); i++) {
 
-        #pragma omp parallel for
-        for (long long unsigned int i = 0; i < FreeParticles.size(); i++) {
-            FreeParticles[i].RandomWalk(1,2);
+        //make concentric circles of particles
+        if(i / 5 < screenHeight / 2 and i % 500 == 0){
+            std::vector<Particle> fp2 = CreateCircle(100 * (1 + i / 50),RED,{screenWidth/2.0, screenHeight/2.0}, 60 + i / 5);
+            freeParticles.insert(freeParticles.end(), fp2.begin(), fp2.end());
+        }
+        //random walk for each
+        for(unsigned int i = 0; i < freeParticles.size(); i++){
+            Particle p = freeParticles[i];
+            p.RandomWalk(1, 1);
+            freeParticles[i] = p;
+        }
 
-            for (long long unsigned int j = 0; j < ClusterParticles.size(); j++) {
-                float distance = vector2distance(FreeParticles[i].pos, ClusterParticles[j].pos);
+        //make quad tree
+        QuadTree qt {0, Rectangle{0, 0, screenWidth, screenHeight}}; 
+        for(unsigned int i = 0; i < freeParticles.size(); i++){
+            qt.Insert(freeParticles[i]);
+        }
 
-                if (distance < collisionThreshold) {
-                    FreeParticles[i].isStuck = true;
-                    FreeParticles[i].color = WHITE;
-                    ClusterParticles.push_back(FreeParticles[i]);
-                    FreeParticles.erase(FreeParticles.begin() + i);
-                    break;
+        //naive collision check
+        /*#pragma omp parallel for
+        for(unsigned int i = 0; i < aggregateParticles.size(); ++i){
+            for(unsigned int j = 0; j < freeParticles.size(); ++j){
+                if(CheckCollisionPointCircle(freeParticles[j].pos, aggregateParticles[i].pos, collisionThreshold)){
+                    freeParticles[j].isStuck = true;
+                    freeParticles[j].color = WHITE;
+                    #pragma omp critical
+                    {
+                        aggregateParticles.push_back(std::move(freeParticles[j]));
+                        freeParticles.erase(freeParticles.begin() + j);
+                    }
                 }
             }
-        }
-
-        for (long long unsigned int i = 0; i < FreeParticles.size(); i++) {
-            FreeParticles[i].RandomWalk(1,2);
-        }
-
-        for (long long unsigned int i = 0; i < ClusterParticles.size(); i++) {
-            //ClusterParticles[i].RandomWalk(1, 1);
-        }
-
-
-
-        // Split the FreeParticles vector into smaller chunks
-        int chunkSize = FreeParticles.size() / numThreads;
-        std::vector<std::vector<Particle>> particleChunks(numThreads);
-        for (int i = 0; i < numThreads; i++) {
-            int startIndex = i * chunkSize;
-            int endIndex = (i == numThreads - 1) ? FreeParticles.size() : (i + 1) * chunkSize;
-            particleChunks[i] = std::vector<Particle>(FreeParticles.begin() + startIndex, FreeParticles.begin() + endIndex);
-        }
-
-        // Create a vector of futures to hold the results of each thread
-        std::vector<std::future<std::vector<Particle>>> futures(numThreads);
-
-        // Launch each thread to calculate the movement of its subset of particles
-        for (int i = 0; i < numThreads; i++) {
-            futures[i] = std::async(std::launch::async, [](const std::vector<Particle>& particles) {
-                std::vector<Particle> newParticles;
-            newParticles.reserve(particles.size());
-            for (const auto& particle : particles) {
-                Particle newParticle = particle;
-                newParticle.RandomWalk(1, 2);
-                newParticles.push_back(newParticle);
-            }
-            return newParticles;
-                }, particleChunks[i]);
-        }
-
-        // Wait for each thread to finish and combine the results into a single vector
-        std::vector<Particle> newParticles;
-        for (int i = 0; i < numThreads; i++) {
-            std::vector<Particle> result = futures[i].get();
-            newParticles.insert(newParticles.end(), result.begin(), result.end());
-        }
-
-        // Replace the old FreeParticles vector with the new one
-        FreeParticles = newParticles;
-
-
+        }*/
 
         BeginDrawing();
+        {
 
-        ClearBackground(BLACK);
-        DrawFPS(20, 20);
+            ClearBackground(BLACK);
+            DrawFPS(20,20);
+            DrawText(TextFormat("freeParticles: %d,\tCluster Particles: %d,\tTotal Particles: %d", int(freeParticles.size()), int(aggregateParticles.size()), int(freeParticles.size() + aggregateParticles.size())), 20, 50, 20, GREEN);
 
-        BeginMode2D(camera);
-        for (long long unsigned int i = 0; i < FreeParticles.size(); i++) {
-            DrawRectangleV(FreeParticles[i].pos, { 2,2 }, FreeParticles[i].color);
-            //DrawPixelV(FreeParticles[i].pos, FreeParticles[i].color);
-            //DrawCircleV(FreeParticles[i].pos, 2, FreeParticles[i].color);
+            qt.Draw();
+            
+            //draw cluster
+            for (unsigned int i = 0; i < aggregateParticles.size(); i++) {
+                DrawPixelV(aggregateParticles[i].pos, aggregateParticles[i].color);
+            }
         }
-
-        for (long long unsigned int i = 0; i < ClusterParticles.size(); i++) {
-            //DrawCircleV(ClusterParticles[i].pos, 3, ClusterParticles[i].color);
-            DrawRectangleV(ClusterParticles[i].pos, { 2,2 }, ClusterParticles[i].color);
-        }
-        EndMode2D();
-
-
         EndDrawing();
     }
 
