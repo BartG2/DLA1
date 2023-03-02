@@ -20,7 +20,7 @@ float RandomFloat(float min, float max, std::mt19937& rng);
 //---------------------------------------------------------------------------------------------------------------------------------
 
 
-const int screenWidth = 2560, screenHeight = 1440, numThreads = 4;
+const int screenWidth = 2560, screenHeight = 1440, numThreads = 2;
 int startingNumParticles = 20000, startingClusterParticles = 1;
 const float collisionThreshold = 3.5f;
 Vector2 particleSize = {2,2};
@@ -110,7 +110,7 @@ public:
 
     std::mutex particlesMutex; // add mutex member variable
     std::mutex isDividedMutex;
-    std::mutex mtx;
+    std::mutex childrenMutex;
 
     //std::vector<Particle*> particles;
     std::vector<Particle> particles;
@@ -131,7 +131,6 @@ public:
         }
     }
 
-
     bool isLeaf(){
         if(children[0] == nullptr){
             return true;
@@ -140,6 +139,7 @@ public:
     }
 
     void InsertAllParticlesParallel(std::vector<Particle>& allParticles) {
+        Timer t;
         const int numChunks = numThreads;
         const int chunkSize = allParticles.size() / numChunks;
         std::vector<std::future<void>> futures;
@@ -157,6 +157,30 @@ public:
         }
     }
 
+    /*void InsertAllParticlesParallel(std::vector<Particle>& allParticles) {
+        Timer t;
+        const int numChunks = numThreads;
+        const int chunkSize = allParticles.size() / numChunks;
+
+        // create a thread pool with numThreads worker threads
+        ThreadPool pool(numThreads);
+
+        // submit tasks to the thread pool
+        for (int i = 0; i < numChunks; ++i) {
+            auto begin = allParticles.begin() + i * chunkSize;
+            auto end = (i == numChunks - 1) ? allParticles.end() : begin + chunkSize;
+            pool.submit([this, begin, end]() {
+                for (auto it = begin; it != end; ++it) {
+                    this->Insert(*it);
+                }
+            });
+        }
+
+        // wait for all tasks to finish
+        pool.waitAll();
+    }*/
+
+
     void InsertAllParticles(std::vector<Particle>& allParticles) {
         for(auto& p : allParticles){
             Insert(p);
@@ -169,8 +193,9 @@ public:
             return;
         }
 
+        std::lock_guard<std::mutex> lock(particlesMutex);
+
         if (particles.size() < capacity) {
-            std::lock_guard<std::mutex> lock(particlesMutex); // Lock the mutex
             if (particles.size() < capacity) {
                 particles.push_back(std::move(p));
             }
@@ -184,17 +209,34 @@ public:
                 isDivided = true;
             }
 
+            std::lock_guard<std::mutex> childrenLock(childrenMutex);
             children[0]->Insert(p);
             children[1]->Insert(p);
             children[2]->Insert(p);
             children[3]->Insert(p);
         }
         else {
-            std::lock_guard<std::mutex> lock(particlesMutex); // Lock the mutex
             particles.push_back(std::move(p));
         }
     }
 
+    std::vector<Particle> checkCollisions(std::vector<Particle>& cluster){
+        std::vector<Particle> collided;
+
+        for(unsigned int i = 0; i < cluster.size(); i++){
+            std::vector<Particle> inRange = {queryCircle(cluster[i].pos, collisionThreshold)};
+
+            for(unsigned int j = 0; j < inRange.size(); j++){
+                if(CheckCollisionPointCircle(inRange[j].pos, cluster[i].pos, collisionThreshold)){
+                    inRange[j].isStuck = true;
+                    collided.push_back(inRange[j]);
+                    removeParticle(inRange[j]);
+                }
+            }
+        }
+
+        return collided;
+    }
 
     std::vector<Particle> queryCircle(const Vector2& center, float radius) {
         std::vector<Particle> results;
@@ -226,14 +268,11 @@ public:
 
     /*std::vector<Particle> queryCircle(const Vector2& center, float radius) {
         std::vector<Particle> results;
-
         std::lock_guard<std::mutex> lock(particlesMutex); // Lock the mutex
-
         // Check if the boundary intersects the circle
         if (!CheckCollisionCircleRec(center, radius, boundary)) {
             return results;
         }
-
         // Divide particles into chunks
         const int numChunks = 2;
         const int chunkSize = particles.size() / numChunks;
@@ -251,13 +290,11 @@ public:
                 return chunkResults;
             }, begin, end));
         }
-
         // Combine results from all chunks
         for (auto& future : futures) {
             auto chunkResults = future.get();
             results.insert(results.end(), chunkResults.begin(), chunkResults.end());
         }
-
         // Recursively search each child node
         if (isDivided) {
             for (auto& child : children) {
@@ -265,35 +302,35 @@ public:
                 results.insert(results.end(), childResults.begin(), childResults.end());
             }
         }
-
         return results;
     }*/
 
+    void Divide() {
+        //in order of unit circle quadrants
+        std::lock_guard<std::mutex> lock(childrenMutex);
+        children[0] = std::make_unique<QuadTree>(Rectangle{ boundary.x + halfWidth, boundary.y, halfWidth, halfHeight });
+        children[1] = std::make_unique<QuadTree>(Rectangle{ boundary.x, boundary.y, halfWidth, halfHeight });
+        children[2] = std::make_unique<QuadTree>(Rectangle{ boundary.x, boundary.y + halfHeight, halfWidth, halfHeight });
+        children[3] = std::make_unique<QuadTree>(Rectangle{ boundary.x + halfWidth, boundary.y + halfHeight, halfWidth, halfHeight });
 
+        //std::lock_guard<std::mutex> particlesLock(particlesMutex);
 
-void Divide() {
-    //in order of unit circle quadrants
-    std::lock_guard<std::mutex> lock(mtx);
-    children[0] = std::make_unique<QuadTree>(Rectangle{ boundary.x + halfWidth, boundary.y, halfWidth, halfHeight });
-    children[1] = std::make_unique<QuadTree>(Rectangle{ boundary.x, boundary.y, halfWidth, halfHeight });
-    children[2] = std::make_unique<QuadTree>(Rectangle{ boundary.x, boundary.y + halfHeight, halfWidth, halfHeight });
-    children[3] = std::make_unique<QuadTree>(Rectangle{ boundary.x + halfWidth, boundary.y + halfHeight, halfWidth, halfHeight });
+        for (auto& p : particles) {
+            for (auto& child : children) {
+                child->Insert(p);
+            }
+        }
 
-    for (auto& p : particles) {
+        particles.clear();
+
         for (auto& child : children) {
-            child->Insert(p);
+            child->treeDepth = treeDepth + 1;
         }
     }
 
-    particles.clear();
-
-    for (auto& child : children) {
-        child->treeDepth = treeDepth + 1;
-    }
-}
-
-
     void clear(){
+        std::lock_guard<std::mutex> particlesLock(particlesMutex);
+        std::lock_guard<std::mutex> childrenLock(childrenMutex);
         particles.clear();
         for(int i = 0; i < 4; i++){
             if(children[i]){
@@ -312,17 +349,21 @@ void Divide() {
 
         if (isDivided) {
             for (auto& child : children) {
+                //std::lock_guard<std::mutex> lock(particlesMutex);
+                //std::lock_guard<std::mutex> lock2(childrenMutex);
                 if(child->particles.size() > 0){
                     child->Draw();
                 }
             }
         }
     }
+
+    void removeParticle(const Particle& p) {
+        std::lock_guard<std::mutex> lock(particlesMutex);
+        particles.erase(std::remove_if(particles.begin(), particles.end(),
+            [&p](const Particle& q) { return &p == &q; }), particles.end());
+    }
 };
-
-
-//---------------------------------------------------------------------------------------------------------------------------------
-
 
 //---------------------------------------------------------------------------------------------------------------------------------
 
@@ -358,7 +399,6 @@ void InsertParticles(const std::vector<Particle>& particles, QuadTree& tree) {
         tree.particles.insert(tree.particles.end(), threadParticlesToAdd.begin(), threadParticlesToAdd.end());
     }
 }
-
 
 std::mt19937 CreateGeneratorWithTimeSeed() {
     // Get the current time in nanoseconds
@@ -432,7 +472,6 @@ std::vector<Particle> randomWalkMultiThreaded(std::vector<Particle> FreeParticle
 
         return newParticles;
 }
-
 
 std::vector<Particle> checkCollisionsSingleThread(std::vector<Particle>& cluster, std::vector<Particle>& FreeParticles, QuadTree& qt){
         std::vector<Particle> newParticles, result;
@@ -517,9 +556,6 @@ std::vector<Particle> checkCollisionsMultiThread(std::vector<Particle>& cluster,
     return result;
 }
 
-
-
-
 std::vector<Particle> checkCollisions(std::vector<Particle>& cluster, std::vector<Particle>& FreeParticles, QuadTree& qt){
     qt.clear();
     for(unsigned int i = 0; i < FreeParticles.size(); i++){
@@ -548,7 +584,6 @@ std::vector<Particle> checkCollisions(std::vector<Particle>& cluster, std::vecto
     }
 }
 
-
 //---------------------------------------------------------------------------------------------------------------------------------
 
 int main() {
@@ -560,10 +595,8 @@ int main() {
     omp_set_num_threads(24);
 
     //std::vector<Particle> FreeParticles(startingNumParticles,Particle(1000,700,RED));
-    std::vector<Particle> FreeParticles = CreateCircle(10000,RED,{screenWidth/2.0,screenHeight/2.0}, queryRadius);
-    std::vector<Particle> fp2 = CreateCircle(90000,RED,{screenWidth/2.0,screenHeight/2.0}, queryRadius*2);
-
-    FreeParticles.insert(FreeParticles.end(), fp2.begin(), fp2.end());
+    std::vector<Particle> FreeParticles = CreateCircle(100,RED,{screenWidth/2.0,screenHeight/2.0}, 30);
+    //std::vector<Particle> fp2 = CreateCircle(200000,RED,{screenWidth/2.0,screenHeight/2.0}, queryRadius*2);
 
     //std::vector<Particle> FreeParticles(1000, Particle(RandomFloat(0,screenWidth, rng),RandomFloat(0,screenHeight, rng), RED));     //random particles
     std::vector<Particle> ClusterParticles(startingClusterParticles,Particle(screenWidth/2.0,screenHeight/2.0,GREEN));
@@ -581,6 +614,11 @@ int main() {
     //main loop
     for (int i = 0; !WindowShouldClose(); i++) {
 
+        if(i % 500 == 0 and i / 5 < screenHeight / 2){
+            std::vector<Particle> fp2 = CreateCircle(200 * (1 + i / 50),RED,{screenWidth/2.0,screenHeight/2.0}, 60 + i / 5);
+            FreeParticles.insert(FreeParticles.end(), fp2.begin(), fp2.end());
+        }
+
         FreeParticles = randomWalkMultiThreaded(FreeParticles);
 
         //check for points in central circle using qt
@@ -594,7 +632,20 @@ int main() {
         }*/
 
 
-        std::vector<Particle> collided {checkCollisionsMultiThread(ClusterParticles, FreeParticles, qt)};
+        //std::vector<Particle> collided {checkCollisionsMultiThread(ClusterParticles, FreeParticles, qt)};
+
+        qt.clear();
+        qt.InsertAllParticlesParallel(FreeParticles);
+        //qt.InsertAllParticles(FreeParticles);
+        std::vector<Particle> collided = qt.checkCollisions(ClusterParticles);
+
+        for(unsigned int i = 0; i < collided.size(); i++){
+            for(unsigned int j = 0; j < FreeParticles.size(); j++){
+                if(FreeParticles[j].pos.x == collided[i].pos.x and FreeParticles[j].pos.y == collided[i].pos.y){
+                    FreeParticles.erase(FreeParticles.begin() + j);
+                }
+            }
+        }
 
         for(auto p: collided){
             p.color = WHITE;
@@ -606,7 +657,8 @@ int main() {
 
         ClearBackground(BLACK);
         DrawFPS(20, 20);
-        DrawText("Hello", 100, 30, 12, GREEN);
+        //int s = FreeParticles.size();
+        DrawText(TextFormat("FreeParticles: %d\tCluster Particles: %d\tTotal Particles: %d", int(FreeParticles.size()), int(ClusterParticles.size()), int(FreeParticles.size() + ClusterParticles.size())), 200, 100, 20, GREEN);
 
         //draw cluster
         for (long long unsigned int i = 0; i < ClusterParticles.size(); i++) {
