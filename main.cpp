@@ -189,13 +189,17 @@ private:
     }
 
 public:
-    QuadTree(int level, Rectangle bounds)
+    /*QuadTree(int level, Rectangle bounds)
         :level(level), bounds(bounds)
     {
         for (int i = 0; i < 4; i++) {
             children[i] = nullptr;
         }
-    }
+    }*/
+
+    QuadTree(int level, Rectangle bounds)
+        : level(level), bounds(bounds), children()
+    {}
 
     ~QuadTree() {
         for (int i = 0; i < 4; i++) {
@@ -205,7 +209,7 @@ public:
         }
     }
 
-    void Insert(Particle particle) {
+    void Insert(const Particle& particle) {
         if(!CheckCollisionPointRec(particle.pos, bounds)){
             return;
         }
@@ -329,7 +333,9 @@ public:
 
         if(IsDivisible()){
             for(int i = 0; i < 4; i++){
-                children[i]->Draw();
+                if(children[i] != nullptr){
+                    children[i]->Draw();
+                }
             }
         }
     }
@@ -398,11 +404,11 @@ int main() {
     aggregateParticles = {1, Particle(screenWidth / 2.0, screenHeight / 2.0, GREEN)};
 
     //main loop
-    for (int i = 0; !WindowShouldClose(); i++) {
+    for (int frameCount = 0; !WindowShouldClose(); frameCount++) {
 
         //make concentric circles of particles
-        if(i / 5 < screenHeight / 2 and i % 500 == 0){
-            std::vector<Particle> fp2 = CreateCircle(100 * (1 + i / 50),RED,{screenWidth/2.0, screenHeight/2.0}, 60 + i / 5);
+        if(frameCount / 5 < screenHeight / 2 and frameCount % 500 == 0){
+            std::vector<Particle> fp2 = CreateCircle(100 * (1 + frameCount / 50),RED,{screenWidth/2.0, screenHeight/2.0}, 60 + frameCount / 5);
             freeParticles.insert(freeParticles.end(), fp2.begin(), fp2.end());
         }
         //random walk for each
@@ -455,3 +461,4 @@ int main() {
 
     return 0;
 }
+
