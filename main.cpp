@@ -13,14 +13,14 @@
 #include <queue>
 #include <mutex>
 #include <condition_variable>
-
-//---------------------------------------------------------------------------------------------------------------------------------
+#include <memory>
+#include <list>
 
 std::mt19937 CreateGeneratorWithTimeSeed();
 float RandomFloat(float min, float max, std::mt19937& rng);
+bool Contains(const Rectangle& r1, const Rectangle& r2);
 
-//---------------------------------------------------------------------------------------------------------------------------------
-
+//-------------------------------------------------------------------------------------------------------------------------------------------------------
 
 constexpr int screenWidth = 2560, screenHeight = 1440, numThreads = 2, maxTreeDepth = 7;
 const float collisionThreshold = 3.0f;
@@ -29,57 +29,7 @@ const Vector2 particleSize = {2,2};
 
 std::mt19937 rng = CreateGeneratorWithTimeSeed();
 
-//---------------------------------------------------------------------------------------------------------------------------------
-
-class ThreadPool {
-public:
-    explicit ThreadPool(int threadPoolNumThreads) : stop(false) {
-        for (int i = 0; i < threadPoolNumThreads; ++i) {
-            threads.emplace_back([this] {
-                while (true) {
-                    std::function<void()> task;
-                    {
-                        std::unique_lock<std::mutex> lock(queueMutex);
-                        condition.wait(lock, [this] { return stop || !tasks.empty(); });
-                        if (stop && tasks.empty()) {
-                            return;
-                        }
-                        task = std::move(tasks.front());
-                        tasks.pop();
-                    }
-                    task();
-                }
-            });
-        }
-    }
-
-    ~ThreadPool() {
-        {
-            std::unique_lock<std::mutex> lock(queueMutex);
-            stop = true;
-        }
-        condition.notify_all();
-        for (auto& thread : threads) {
-            thread.join();
-        }
-    }
-
-    template<class F, class... Args>
-    void enqueue(F&& f, Args&&... args) {
-        {
-            std::unique_lock<std::mutex> lock(queueMutex);
-            tasks.emplace(std::bind(std::forward<F>(f), std::forward<Args>(args)...));
-        }
-        condition.notify_one();
-    }
-
-private:
-    std::vector<std::thread> threads;
-    std::queue<std::function<void()>> tasks;
-    std::mutex queueMutex;
-    std::condition_variable condition;
-    bool stop;
-};
+//-------------------------------------------------------------------------------------------------------------------------------------------------------
 
 class Particle {
 public:
@@ -150,59 +100,27 @@ public:
     }
 };
 
-class QuadTree {
+class StaticQuadTree {
 private:
     const int MAX_CAPACITY = 800; // Maximum number of particles in a node before dividing
-    const int MAX_LEVELS = 7; // Maximum depth of the QuadTree
+    const int MAX_LEVELS = 7; // Maximum depth of the StaticQuadTree
 
     int level;
     Rectangle bounds;
     
     std::vector<Particle> particles;
-    std::array<std::unique_ptr<QuadTree>, 4> children;
-
-    bool IsDivisible() {
-        return level < MAX_LEVELS and particles.size() > MAX_CAPACITY;
-    }
-
-    void Subdivide() {
-        float x = bounds.x;
-        float y = bounds.y;
-        float w = bounds.width / 2.0f;
-        float h = bounds.height / 2.0f;
-
-        children[0] = std::make_unique<QuadTree>(level + 1, Rectangle{x, y, w, h});
-        children[1] = std::make_unique<QuadTree>(level + 1, Rectangle{x + w, y, w, h});
-        children[2] = std::make_unique<QuadTree>(level + 1, Rectangle{x + w, y + h, w, h});
-        children[3] = std::make_unique<QuadTree>(level + 1, Rectangle{x, y + h, w, h});
-
-        for(unsigned int i = 0; i < particles.size(); i++){
-            for(unsigned int j = 0; j < 4; j++){
-                if(CheckCollisionPointRec(particles[i].pos, children[j]->bounds)){
-                    children[j]->Insert(particles[i]);
-                    break;
-                }
-            }
-        }
-
-        particles.clear();
-    }
-
+    //std::array<std::unique_ptr<StaticQuadTree>, 4> children;
+    std::array<std::shared_ptr<StaticQuadTree>, 4> children;
+    std::array<Rectangle, 4> childAreas;
 
 public:
-    /*QuadTree(int level, Rectangle bounds)
-        :level(level), bounds(bounds)
-    {
-        for (int i = 0; i < 4; i++) {
-            children[i] = nullptr;
-        }
-    }*/
 
-    QuadTree(int level, Rectangle bounds)
-        : level(level), bounds(bounds), children()
-    {}
+    StaticQuadTree(const int currentDepth = 0, const Rectangle& size = {0, 0, screenWidth, screenHeight}){
+        level = currentDepth;
+        resize(size);
+    }
 
-    ~QuadTree() {
+    ~StaticQuadTree() {
         for (int i = 0; i < 4; i++) {
             if (children[i] != nullptr) {
                 children[i] = nullptr;
@@ -211,123 +129,127 @@ public:
         }
     }
 
-    void Insert(const Particle& particle) {
-        if(!CheckCollisionPointRec(particle.pos, bounds)){
-            return;
-        }
+    void resize(const Rectangle& newArea){
+        clear();
 
-        if (!IsDivisible()) {
-            particles.push_back(particle);
-            return;
-        }
-        else {
-            if (children[0] == nullptr) {
-                Subdivide();
+        bounds = newArea;
+        float newWidth = bounds.width / 2.0f, newHeight = bounds.height / 2.0f;
+        
+        //unit circle order
+        childAreas[0] = Rectangle{bounds.x + bounds.width, bounds.y, newWidth, newHeight};
+        childAreas[1] = Rectangle{bounds.x, bounds.y, newWidth, newHeight};
+        childAreas[2] = Rectangle{bounds.x, bounds.y + bounds.height, newWidth, newHeight};
+        childAreas[3] = Rectangle{bounds.x + bounds.width, bounds.y + bounds.height, newWidth, newHeight};
+
+
+    }
+
+    void insert(const Particle& p){
+         for(int i = 0; i < 4; i++){
+            if(CheckCollisionPointRec(p.pos, childAreas[i])){
+                //check if past depth limit
+                if(level < MAX_LEVELS){
+                    //does child exist
+                    if(!children[i]){
+                        children[i] = std::make_shared<StaticQuadTree>(level + 1, childAreas[i]);
+                    }
+                    //recursive calls
+                    children[i]->insert(p);
+                    return;
+                }
             }
+         }
 
-            for (int i = 0; i < 4; i++) {
-                children[i]->Insert(particle);
+         //p can't go in any children, so it goese here
+         particles.push_back(p);
+    }
+
+    std::list<Particle> search(const Rectangle& searchArea) const{
+        std::list<Particle> listItems;
+        search(searchArea, listItems);
+        return listItems;
+    }
+
+    void search(const Rectangle& searchArea, std::list<Particle>& listItems) const{
+        //check for Particles belonging to this area and add to list
+        for(const auto& p : particles){
+            if(CheckCollisionPointRec(p.pos, searchArea)){
+                listItems.push_back(p);
+            }
+        }
+
+        //recursive children calls
+        for(int i = 0; i < 4; i++){
+            if(children[i]){
+                //if child is entirely contained by search area, add all children without bounds check
+                if(Contains(searchArea, childAreas[i])){
+                    children[i]->returnChildItems(listItems);
+                }
+                //child and search area overlap, but child not contained
+                else if(CheckCollisionRecs(childAreas[i], searchArea)){
+
+                }
             }
         }
     }
 
-    std::vector<Particle> Query(const Vector2 center, const float radius) {
-        std::vector<Particle> result;
-
-        // Check if the node's bounds intersect with the circle
-        if (!CheckCollisionCircleRec(center, radius, bounds)) {
-            return result;
+    //return all of child's particles
+    void returnChildItems(std::list<Particle> listItems){
+        for(const auto& p : particles){
+            listItems.push_back(p);
         }
 
-        // If the node is not divisible, check each particle and add it to the result if it is inside the circle
-        if (!IsDivisible()) {
-            for (const auto& particle : particles) {
-                if (CheckCollisionPointCircle(particle.pos, center, radius)) {
-                    result.push_back(particle);
-                }
+        //recursive calls
+        for(int i = 0; i < 4; i++){
+            if(children[i]){
+                children[i]->returnChildItems(listItems);
             }
         }
-        else {
-            // If the node is divisible, recursively query each child node and concatenate their results
-            for (const auto& child : children) {
-                if (child != nullptr) {
-                    std::vector<Particle> childResult = child->Query(center, radius);
-                    result.insert(result.end(), childResult.begin(), childResult.end());
-                }
-            }
-        }
-
-
-        return result;
     }
 
     void clear(){
         particles.clear();
 
-        if(children[0] != nullptr){
-            for(const auto& child : children){
-                child->clear();
+        for(int i = 0; i < 4; i++){
+            if(children[i]){
+                children[i]->clear();
             }
+            children[i].reset();
         }
     }
 
-    /*std::vector<Particle> Query(const Rectangle& range) const {
-        std::vector<Particle> result;
+    int size(){
+        int count = particles.size();
 
-        if (!bounds.Intersects(range)) {
-            return result;
-        }
-
-        for (const auto& particle : particles) {
-            if (range.Contains(particle.pos)) {
-                result.push_back(particle);
+        for(int i = 0; i < 4; i++){
+            if(children[i]){
+                count += children[i]->size();
             }
         }
 
-        if (children[0] != nullptr) {
-            for (int i = 0; i < 4; i++) {
-                auto childResult = children[i]->Query(range);
-                result.insert(result.end(), childResult.begin(), childResult.end());
-            }
-        }
+        return count;
+    }
 
-        return result;
-    }*/
-
-    void Draw(){
+    void draw(){
         DrawRectangleLinesEx(bounds, 0.5, GREEN);
 
-        if(!IsDivisible()){
-            for(unsigned int i = 0; i < particles.size(); i++){
-                DrawPixelV(particles[i].pos, particles[i].color);
-            }
+        for(unsigned int i = 0; i < particles.size(); i++){
+            DrawPixelV(particles[i].pos, particles[i].color);
         }
-        else{
-            for(int i = 0; i < 4; i++){
-                if(children[i] != nullptr){
-                    children[i]->Draw();
-                }
-            }
-        }
-    }
 
-    int getTreeSize(){
-        int count = particles.size();
-        if(children[0] != nullptr){
-            for(const auto& child : children){
-                count += child->particles.size();
+        for(int i = 0; i < 4; i++){
+            if(children[i]){
+                children[i]->draw();
             }
         }
-        std::cout << count << std::endl;
-        return count;
     }
 };
 
-//---------------------------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------------------------------------------------
 
 std::vector<Particle> freeParticles, aggregateParticles;
 
-//---------------------------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------------------------------------------------
 
 std::mt19937 CreateGeneratorWithTimeSeed() {
     // Get the current time in nanoseconds
@@ -363,57 +285,87 @@ std::vector<Particle> CreateCircle(int numParticles, Color col, Vector2 center, 
 
     return particles;
 }
-//---------------------------------------------------------------------------------------------------------------------------------
 
-int main() {
+//r1 contains r2
+bool Contains(const Rectangle& r1, const Rectangle& r2){
+    return (r2.x >= r1.x) and (r2.x + r2.width < r1.x + r1.width) and (r2.y >= r1.y) and(r2.y + r2.height < r1.y + r1.height);
+}
 
-    InitWindow(screenWidth, screenHeight, "DLA");
+//-------------------------------------------------------------------------------------------------------------------------------------------------------
+
+void Initialize(){
+    InitWindow(screenWidth, screenHeight, "DLA, hopefully");
     SetTargetFPS(100);
-    //omp_set_num_threads(32);
 
-    freeParticles = CreateCircle(400,RED,{screenWidth/2.0,screenHeight/2.0}, 40);
-    aggregateParticles = {1, Particle(screenWidth / 2.0, screenHeight / 2.0, GREEN)};
+    constexpr int startingNumParticles = 100, startingRadius = 100;
+    const Color startingColor = RED;
+    const Vector2 startingCenter = {screenWidth / 2, screenHeight / 2};
 
-    //main loop
-    for (int frameCount = 0; !WindowShouldClose(); frameCount++) {
+    freeParticles = CreateCircle(startingNumParticles, startingColor, startingCenter, startingRadius);
+    aggregateParticles = {1, Particle(screenWidth / 2.0, screenHeight / 2.0, WHITE)};
+}
 
-        //make concentric circles of particles
-        if(frameCount / 5 < screenHeight / 2 and frameCount % 500 == 0){
-            std::vector<Particle> fp2 = CreateCircle(400 * (1 + frameCount / 50),RED,{screenWidth/2.0, screenHeight/2.0}, 60 + frameCount / 5);
-            freeParticles.insert(freeParticles.end(), fp2.begin(), fp2.end());
-        }
-        //random walk for each
-        for(unsigned int i = 0; i < freeParticles.size(); i++){
-            Particle p = freeParticles[i];
-            p.RandomWalk(1, 1);
-            freeParticles[i] = p;
-        }
+void DrawParticlesVector(const std::vector<Particle>& particles){
+    for(unsigned int i = 0; i < particles.size(); i++){
+        DrawPixelV(particles[i].pos, particles[i].color);
+    }
+}
 
-        //make quad tree
-        QuadTree qt {0, Rectangle{0, 0, screenWidth, screenHeight}}; 
-        for(unsigned int i = 0; i < freeParticles.size(); i++){
-            qt.Insert(freeParticles[i]);
-        }
+void RandomWalkAll(std::vector<Particle>& particles){
+    
+    for(auto& p : particles){
+        p.RandomWalk(1, 1);
+    }
+}
 
-        BeginDrawing();
-        {
+StaticQuadTree InitializeQT(){
+    StaticQuadTree qt(0, {0, 0, screenWidth, screenHeight});
 
-            ClearBackground(BLACK);
-            DrawFPS(20,20);
-            DrawText(TextFormat("freeParticles: %d,\tCluster Particles: %d,\tTotal Particles: %d", int(freeParticles.size()), int(aggregateParticles.size()), int(freeParticles.size() + aggregateParticles.size())), 20, 50, 20, GREEN);
-
-            qt.Draw();
-            
-            //draw cluster
-            for (unsigned int i = 0; i < aggregateParticles.size(); i++) {
-                DrawPixelV(aggregateParticles[i].pos, aggregateParticles[i].color);
-            }
-        }
-        EndDrawing();
+    for(unsigned int i = 0; i < freeParticles.size(); i++){
+        qt.insert(freeParticles[i]);
     }
 
-    CloseWindow();
+    return qt;
+}
+
+void ConcentricCircles(int frameCount){
+    if(frameCount / 5 < screenHeight / 2 and frameCount % 500 == 0){
+        std::vector<Particle> fp2 = CreateCircle(40 * (1 + frameCount / 50),RED,{screenWidth/2.0, screenHeight/2.0}, 60 + frameCount / 5);
+        freeParticles.insert(freeParticles.end(), fp2.begin(), fp2.end());
+    }
+}
+
+//-------------------------------------------------------------------------------------------------------------------------------------------------------
+
+int main(){
+    Initialize();
+    
+    for(int frameCount = 0; !WindowShouldClose(); frameCount++){
+
+        StaticQuadTree qt = InitializeQT();
+
+        ConcentricCircles(frameCount);
+
+        const Rectangle searchArea {screenWidth / 2, screenHeight / 2, screenWidth / 2, screenHeight / 2};
+        std::list<Particle> searchResults = qt.search(searchArea);
+        
+        BeginDrawing();
+        {
+            ClearBackground(BLACK);
+            DrawFPS(10,10);
+
+            RandomWalkAll(freeParticles);
+
+            DrawParticlesVector(freeParticles);
+            DrawParticlesVector(aggregateParticles);
+            for(auto it = searchResults.begin(); it != searchResults.end(); it++){
+                DrawPixelV(it->pos, BLUE);
+            }
+
+        }
+        EndDrawing();
+
+    }
 
     return 0;
 }
-
